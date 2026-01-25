@@ -1,0 +1,19 @@
+version: '3.8'
+
+# Development override - extends docker-compose.yml
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  api:
+    build:
+      target: production  # Can create a 'development' stage if needed
+    volumes:
+      # Mount source code for hot reload (if using watch mode)
+      - .:/app
+      - /app/__pycache__
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DEBUG=true
+    command: python servicio_ytmusic.py
+    # Override to use uvicorn with reload for development
+    # command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

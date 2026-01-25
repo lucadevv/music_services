@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     CACHE_MAX_SIZE: int = 1000  # Max items in memory cache
     
     # Redis Configuration (if using Redis cache)
-    REDIS_HOST: str = "localhost"
+    REDIS_HOST: str = "localhost"  # Use "redis" when running in Docker Compose
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
     REDIS_PASSWORD: Optional[str] = None

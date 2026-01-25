@@ -138,6 +138,8 @@ PORT=8000
 
 ## 🏃 Ejecución
 
+### Opción 1: Ejecución Local
+
 ```bash
 python servicio_ytmusic.py
 ```
@@ -146,6 +148,29 @@ O directamente con uvicorn:
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### Opción 2: Docker Compose (Recomendado)
+
+```bash
+# Levantar servicios
+docker-compose up -d
+
+# Ver logs
+docker-compose logs -f api
+
+# Verificar salud
+curl http://localhost:8000/health
+```
+
+**Ver [DOCKER.md](DOCKER.md) para más detalles sobre Docker.**
+
+**Comandos rápidos con Make:**
+```bash
+make up      # Levantar servicios
+make logs    # Ver logs
+make health  # Verificar salud
+make down    # Detener servicios
 ```
 
 ## 📚 Documentación

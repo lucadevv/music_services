@@ -1,0 +1,102 @@
+services:
+  # YouTube Music API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: music_app_api
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      # Server Configuration
+      - HOST=0.0.0.0
+      - PORT=8000
+      
+      # YouTube Music Configuration
+      - BROWSER_JSON_PATH=/app/browser.json
+      - OAUTH_JSON_PATH=${OAUTH_JSON_PATH:-}
+      
+      # CORS Configuration
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      
+      # Rate Limiting
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}
+      - RATE_LIMIT_PER_HOUR=${RATE_LIMIT_PER_HOUR:-1000}
+      
+      # Caching Configuration
+      - CACHE_ENABLED=${CACHE_ENABLED:-true}
+      - CACHE_BACKEND=${CACHE_BACKEND:-redis}
+      - CACHE_TTL=${CACHE_TTL:-300}
+      - CACHE_MAX_SIZE=${CACHE_MAX_SIZE:-1000}
+      
+      # Redis Configuration (when using Redis cache)
+      - REDIS_HOST=${REDIS_HOST:-ytmusic_redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_DB=${REDIS_DB:-0}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      
+      # Performance
+      - ENABLE_COMPRESSION=${ENABLE_COMPRESSION:-true}
+      - HTTP_TIMEOUT=${HTTP_TIMEOUT:-30}
+      - MAX_WORKERS=${MAX_WORKERS:-10}
+    volumes:
+      # Mount browser.json if it exists (for authentication)
+      - ./browser.json:/app/browser.json:ro
+      - ${OAUTH_JSON_PATH:-./oauth.json}:/app/oauth.json:ro
+    depends_on:
+      ytmusic_redis:
+        condition: service_healthy
+    networks:
+      - music_app_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Redis dedicado para YouTube Music API Service
+  ytmusic_redis:
+    image: redis:7-alpine
+    container_name: ytmusic_redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6380}:6379"  # Puerto diferente para evitar conflictos
+    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+    volumes:
+      - ytmusic_redis_data:/data
+    networks:
+      - music_app_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+networks:
+  music_app_network:
+    driver: bridge
+
+volumes:
+  ytmusic_redis_data:
+    driver: local
