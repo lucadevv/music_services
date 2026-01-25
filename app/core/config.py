@@ -17,10 +17,10 @@ class Settings(BaseSettings):
     OAUTH_JSON_PATH: Optional[str] = None
     
     # CORS Configuration
-    CORS_ORIGINS: list = ["*"]
+    CORS_ORIGINS: str = "*"
     CORS_ALLOW_CREDENTIALS: bool = True
-    CORS_ALLOW_METHODS: list = ["*"]
-    CORS_ALLOW_HEADERS: list = ["*"]
+    CORS_ALLOW_METHODS: str = "*"
+    CORS_ALLOW_HEADERS: str = "*"
     
     # Server Configuration
     HOST: str = "0.0.0.0"
