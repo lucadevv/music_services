@@ -1,9 +1,10 @@
 """Stream endpoints."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Dict, Any
 from app.services.stream_service import StreamService
 from app.core.circuit_breaker import youtube_stream_circuit
 
-router = APIRouter()
+router = APIRouter(tags=["stream"])
 
 
 def get_stream_service() -> StreamService:
@@ -11,17 +12,60 @@ def get_stream_service() -> StreamService:
     return StreamService()
 
 
-@router.get("/{video_id}")
+@router.get(
+    "/{video_id}",
+    summary="Get audio stream URL",
+    description="Obtiene la URL directa de stream de audio de una canción usando yt-dlp. Incluye caché inteligente y circuit breaker.",
+    response_description="URL de stream y metadatos",
+    responses={
+        200: {
+            "description": "Stream URL obtenida exitosamente",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "title": "Song Title",
+                        "artist": "Artist Name",
+                        "duration": 180,
+                        "thumbnail": "https://i.ytimg.com/vi/.../maxresdefault.jpg",
+                        "url": "https://rr5---sn-..."
+                    }
+                }
+            }
+        },
+        429: {
+            "description": "YouTube API rate-limited",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "YouTube API rate-limited",
+                        "message": "Circuit breaker activado",
+                        "circuit_breaker": {"state": "OPEN", "remaining_time_seconds": 300},
+                        "retry_after": 300
+                    }
+                }
+            }
+        },
+        500: {"description": "Error interno del servidor"}
+    }
+)
 async def get_stream_url(
-    video_id: str,
+    video_id: str = Query(..., description="ID del video/canción", example="rMbATaj7Il8"),
     service: StreamService = Depends(get_stream_service)
-):
+) -> Dict[str, Any]:
     """
-    Get audio stream URL using yt-dlp.
+    Obtiene la URL directa de stream de audio de una canción.
     
-    - Cached for 10 minutes to reduce YouTube API calls
-    - Circuit breaker protects against rate limiting
-    - Returns 429 if YouTube is rate-limited
+    **Características:**
+    - Caché inteligente: Metadatos (1 día), Stream URL (4 horas)
+    - Circuit breaker: Protege contra rate limiting de YouTube
+    - Formato: Mejor calidad de audio disponible (bestaudio/best)
+    
+    **Respuesta incluye:**
+    - `url`: URL directa de stream de audio
+    - `title`: Título de la canción
+    - `artist`: Artista
+    - `duration`: Duración en segundos
+    - `thumbnail`: URL de thumbnail en mejor calidad
     """
     try:
         return await service.get_stream_url(video_id)

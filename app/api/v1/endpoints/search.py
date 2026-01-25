@@ -1,13 +1,13 @@
 """Search endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from typing import Optional, List, Dict, Any
 from ytmusicapi import YTMusic
 
 from app.core.ytmusic_client import get_ytmusic
 from app.services.search_service import SearchService
 from app.services.stream_service import StreamService
 
-router = APIRouter()
+router = APIRouter(tags=["search"])
 
 
 def get_search_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> SearchService:
@@ -20,23 +20,66 @@ def get_stream_service() -> StreamService:
     return StreamService()
 
 
-@router.get("/")
+@router.get(
+    "/",
+    summary="Search music content",
+    description="Busca contenido musical en YouTube Music: canciones, videos, álbumes, artistas y playlists.",
+    response_description="Resultados de búsqueda",
+    responses={
+        200: {
+            "description": "Búsqueda exitosa",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "results": [
+                            {
+                                "videoId": "rMbATaj7Il8",
+                                "title": "Song Title",
+                                "artists": [{"name": "Artist"}],
+                                "album": {"name": "Album"},
+                                "stream_url": "https://...",
+                                "thumbnail": "https://..."
+                            }
+                        ],
+                        "query": "search query"
+                    }
+                }
+            }
+        },
+        400: {"description": "Parámetro 'q' faltante"},
+        500: {"description": "Error interno del servidor"}
+    }
+)
 async def search_music(
-    q: str = Query(..., description="Search query"),
-    filter: Optional[str] = Query(None, description="Filter: songs, videos, albums, artists, playlists"),
-    scope: Optional[str] = Query(None, description="Search scope"),
-    limit: int = Query(20, ge=1, le=50, description="Number of results"),
-    ignore_spelling: bool = Query(False, description="Ignore spelling suggestions"),
-    include_stream_urls: bool = Query(True, description="Include stream URLs and best thumbnails for songs/videos"),
+    q: str = Query(..., description="Query de búsqueda", example="cumbia peruana"),
+    filter: Optional[str] = Query(
+        None, 
+        description="Filtro: songs, videos, albums, artists, playlists",
+        example="songs"
+    ),
+    scope: Optional[str] = Query(None, description="Scope de búsqueda"),
+    limit: int = Query(20, ge=1, le=50, description="Número de resultados", example=20),
+    ignore_spelling: bool = Query(False, description="Ignorar sugerencias de ortografía"),
+    include_stream_urls: bool = Query(
+        True, 
+        description="Incluir stream URLs y mejores thumbnails para songs/videos"
+    ),
     service: SearchService = Depends(get_search_service),
     stream_service: StreamService = Depends(get_stream_service)
-):
+) -> Dict[str, Any]:
     """
-    Search for music content.
+    Busca contenido musical en YouTube Music.
     
-    When filter is 'songs' or 'videos', results include:
-    - stream_url: Direct audio stream URL (best quality)
-    - thumbnail: Best quality thumbnail URL
+    **Filtros disponibles:**
+    - `songs`: Solo canciones
+    - `videos`: Solo videos
+    - `albums`: Solo álbumes
+    - `artists`: Solo artistas
+    - `playlists`: Solo playlists
+    
+    Si `filter` es `songs` o `videos` y `include_stream_urls=true`, cada resultado incluye:
+    - `stream_url`: URL directa de audio (mejor calidad)
+    - `thumbnail`: URL de thumbnail en mejor calidad
     """
     if not q:
         raise HTTPException(status_code=400, detail="Falta el parámetro 'q'")
@@ -66,12 +109,30 @@ async def search_music(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/suggestions")
+@router.get(
+    "/suggestions",
+    summary="Get search suggestions",
+    description="Obtiene sugerencias de búsqueda basadas en el query parcial.",
+    response_description="Lista de sugerencias",
+    responses={
+        200: {
+            "description": "Sugerencias obtenidas exitosamente",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "suggestions": ["cumbia peruana", "cumbia colombiana", "cumbia villera"]
+                    }
+                }
+            }
+        },
+        500: {"description": "Error interno del servidor"}
+    }
+)
 async def get_search_suggestions(
-    q: str = Query(..., description="Search query"),
+    q: str = Query(..., description="Query parcial para obtener sugerencias", example="cumb"),
     service: SearchService = Depends(get_search_service)
-):
-    """Get search suggestions."""
+) -> Dict[str, Any]:
+    """Obtiene sugerencias de búsqueda para autocompletado."""
     try:
         suggestions = await service.get_search_suggestions(q)
         return {"suggestions": suggestions}
@@ -79,12 +140,28 @@ async def get_search_suggestions(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/suggestions")
+@router.delete(
+    "/suggestions",
+    summary="Remove search suggestions",
+    description="Elimina una sugerencia de búsqueda del historial.",
+    response_description="Resultado de la eliminación",
+    responses={
+        200: {
+            "description": "Sugerencia eliminada exitosamente",
+            "content": {
+                "application/json": {
+                    "example": {"success": True}
+                }
+            }
+        },
+        500: {"description": "Error interno del servidor"}
+    }
+)
 async def remove_search_suggestions(
-    q: str = Query(..., description="Search query to remove"),
+    q: str = Query(..., description="Query a eliminar de las sugerencias", example="cumbia"),
     service: SearchService = Depends(get_search_service)
-):
-    """Remove search suggestions."""
+) -> Dict[str, Any]:
+    """Elimina una sugerencia de búsqueda del historial."""
     try:
         result = await service.remove_search_suggestions(q)
         return {"success": result}

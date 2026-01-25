@@ -1,17 +1,12 @@
 """Explore endpoints - Public content: charts, moods, genres."""
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from typing import Optional, Dict, Any, List
 from ytmusicapi import YTMusic
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from app.core.ytmusic_client import get_ytmusic
 from app.services.explore_service import ExploreService
-from app.core.config import get_settings
 
-router = APIRouter()
-settings = get_settings()
-limiter = Limiter(key_func=get_remote_address)
+router = APIRouter(tags=["explore"])
 
 
 def get_explore_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> ExploreService:
@@ -19,18 +14,55 @@ def get_explore_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> ExploreServi
     return ExploreService(ytmusic)
 
 
-@router.get("/")
+@router.get(
+    "/",
+    summary="Get explore content",
+    description="Obtiene contenido de exploración: moods, géneros, charts y home. Incluye top songs y trending con stream URLs opcionales.",
+    response_description="Contenido de exploración con moods, géneros y charts",
+    responses={
+        200: {
+            "description": "Contenido de exploración obtenido exitosamente",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "moods_genres": [
+                            {"title": "Cumbia", "params": "ggMPOg1uX3hRRFdlaEhHU09k"}
+                        ],
+                        "home": [],
+                        "charts": {
+                            "top_songs": [
+                                {
+                                    "videoId": "rMbATaj7Il8",
+                                    "title": "Song Title",
+                                    "artists": [{"name": "Artist"}],
+                                    "stream_url": "https://...",
+                                    "thumbnail": "https://..."
+                                }
+                            ],
+                            "trending": []
+                        }
+                    }
+                }
+            }
+        },
+        500: {"description": "Error interno del servidor"}
+    }
+)
 async def explore_music(
-    include_stream_urls: bool = Query(True, description="Include stream URLs and best thumbnails for charts"),
+    include_stream_urls: bool = Query(
+        True, 
+        description="Incluir stream URLs y mejores thumbnails para charts"
+    ),
     service: ExploreService = Depends(get_explore_service)
-):
+) -> Dict[str, Any]:
     """
-    Get explore content (moods, genres, charts).
+    Obtiene contenido completo de exploración.
     
-    Returns:
-    - moods_genres: Lista de categorías de moods/géneros (cada una tiene 'params' para obtener playlists)
-    - home: Contenido de la página principal
-    - charts: Top songs y trending (con stream_url y thumbnail si include_stream_urls=true)
+    - **moods_genres**: Categorías de moods/géneros con sus `params` para obtener playlists
+    - **home**: Contenido de la página principal de YouTube Music
+    - **charts**: Top songs y trending con `stream_url` y `thumbnail` si `include_stream_urls=true`
+    
+    Cada categoría en `moods_genres` tiene un campo `params` que puedes usar en `/explore/moods/{params}`.
     """
     try:
         # Get home with moods
@@ -81,21 +113,49 @@ async def explore_music(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/moods")
-async def get_mood_categories(service: ExploreService = Depends(get_explore_service)):
-    """
-    Get mood categories.
-    
-    Returns dict with sections: 'For you', 'Genres', 'Moods & moments'.
-    Each category has a 'params' field and 'title'.
-    Use that 'params' value in /explore/moods/{params} to get playlists for that category.
-    
-    Example structure:
-    {
-        'For you': [{'params': '...', 'title': '1980s'}, ...],
-        'Genres': [{'params': '...', 'title': 'Dance & Electronic'}, ...],
-        'Moods & moments': [{'params': '...', 'title': 'Chill'}, ...]
+@router.get(
+    "/moods",
+    summary="Get mood categories",
+    description="Obtiene todas las categorías de moods y géneros disponibles en YouTube Music.",
+    response_description="Categorías organizadas por secciones",
+    responses={
+        200: {
+            "description": "Categorías obtenidas exitosamente",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "categories": {
+                            "For you": [
+                                {"params": "ggMPOg1uX1ZwN0pHT2NBT1Fk", "title": "1980s"}
+                            ],
+                            "Genres": [
+                                {"params": "ggMPOg1uX3hRRFdlaEhHU09k", "title": "Cumbia"}
+                            ],
+                            "Moods & moments": [
+                                {"params": "ggMPOg1uXzVuc0dnZlhpV3Ba", "title": "Chill"}
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        500: {"description": "Error interno del servidor"}
     }
+)
+async def get_mood_categories(
+    service: ExploreService = Depends(get_explore_service)
+) -> Dict[str, Any]:
+    """
+    Obtiene todas las categorías de moods y géneros.
+    
+    Retorna un diccionario con secciones:
+    - **For you**: Categorías personalizadas
+    - **Genres**: Géneros musicales
+    - **Moods & moments**: Estados de ánimo y momentos
+    
+    Cada categoría tiene:
+    - `params`: Usar en `/explore/moods/{params}` para obtener playlists
+    - `title`: Nombre de la categoría
     """
     try:
         categories = await service.get_mood_categories()
@@ -107,21 +167,51 @@ async def get_mood_categories(service: ExploreService = Depends(get_explore_serv
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/moods/{params}")
+@router.get(
+    "/moods/{params}",
+    summary="Get playlists by mood/genre",
+    description="Obtiene playlists de un mood o género específico usando el `params` de una categoría.",
+    response_description="Lista de playlists del mood/género",
+    responses={
+        200: {
+            "description": "Playlists obtenidas exitosamente",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "playlists": [
+                            {
+                                "playlistId": "PL...",
+                                "title": "Best Cumbia Songs",
+                                "thumbnails": [{"url": "https://..."}]
+                            }
+                        ],
+                        "method": "direct"
+                    }
+                }
+            }
+        },
+        500: {"description": "Error al obtener playlists"}
+    }
+)
 async def get_mood_playlists(
-    params: str,
-    genre_name: Optional[str] = Query(None, description="Nombre del género (recomendado si get_mood_playlists falla)"),
-    use_search: bool = Query(False, description="Forzar uso de búsqueda en lugar de get_mood_playlists"),
+    params: str = Query(..., description="Params obtenido de una categoría de mood/género"),
+    genre_name: Optional[str] = Query(
+        None, 
+        description="Nombre del género (fallback si get_mood_playlists falla)"
+    ),
+    use_search: bool = Query(
+        False, 
+        description="Forzar uso de búsqueda alternativa en lugar de get_mood_playlists"
+    ),
     service: ExploreService = Depends(get_explore_service)
-):
+) -> Dict[str, Any]:
     """
-    Get mood/genre playlists by params.
+    Obtiene playlists de un mood o género usando `params`.
     
-    Use the 'params' value from a mood/genre category to get playlists.
-    Each playlist has a 'playlistId' that can be used in /api/v1/playlists/{playlistId}
-    
-    Nota: Si get_mood_playlists() falla (error de parseo), se usará automáticamente
-    búsqueda alternativa. Puedes forzar búsqueda con ?use_search=true
+    - Usa el `params` de una categoría obtenida en `/explore/moods`
+    - Cada playlist retornada tiene un `playlistId` para usar en `/api/v1/playlists/{playlistId}`
+    - Si `get_mood_playlists()` falla, se usa automáticamente búsqueda alternativa
+    - Puedes forzar búsqueda con `?use_search=true`
     """
     # Si se fuerza búsqueda o no hay params válido, usar búsqueda directamente
     if use_search or not params:
@@ -220,18 +310,56 @@ async def get_mood_playlists(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/charts")
+@router.get(
+    "/charts",
+    summary="Get music charts",
+    description="Obtiene los charts de YouTube Music: top songs y trending. Opcionalmente incluye stream URLs.",
+    response_description="Charts con top songs y trending",
+    responses={
+        200: {
+            "description": "Charts obtenidos exitosamente",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "top_songs": [
+                            {
+                                "videoId": "rMbATaj7Il8",
+                                "title": "Top Song",
+                                "artists": [{"name": "Artist"}],
+                                "stream_url": "https://...",
+                                "thumbnail": "https://..."
+                            }
+                        ],
+                        "trending": [],
+                        "country": "global"
+                    }
+                }
+            }
+        },
+        500: {"description": "Error interno del servidor"}
+    }
+)
 async def get_charts(
-    country: Optional[str] = Query(None, description="Country code (e.g., 'US', 'PE')"),
-    include_stream_urls: bool = Query(True, description="Include stream URLs and best thumbnails"),
+    country: Optional[str] = Query(
+        None, 
+        description="Código de país ISO 3166-1 Alpha-2 (ej: 'US', 'PE'). Default: global"
+    ),
+    include_stream_urls: bool = Query(
+        True, 
+        description="Incluir stream URLs y mejores thumbnails"
+    ),
     service: ExploreService = Depends(get_explore_service)
-):
+) -> Dict[str, Any]:
     """
-    Get charts (top songs and trending).
+    Obtiene charts de YouTube Music.
     
-    Returns top songs and trending music with:
-    - stream_url: Direct audio stream URL (best quality)
-    - thumbnail: Best quality thumbnail URL
+    - **top_songs**: Canciones más populares
+    - **trending**: Canciones en tendencia
+    - **country**: País de los charts (o 'global')
+    
+    Si `include_stream_urls=true`, cada canción incluye:
+    - `stream_url`: URL directa de audio (mejor calidad)
+    - `thumbnail`: URL de thumbnail en mejor calidad
     """
     try:
         charts = await service.get_charts(country)
@@ -273,15 +401,24 @@ async def get_charts(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/category/{category_params}")
+@router.get(
+    "/category/{category_params}",
+    summary="Get category playlists (alias)",
+    description="Alias para `/explore/moods/{params}`. Obtiene playlists de una categoría.",
+    response_description="Lista de playlists de la categoría",
+    responses={
+        200: {"description": "Playlists obtenidas exitosamente"},
+        500: {"description": "Error al cargar categoría"}
+    }
+)
 async def get_category(
-    category_params: str,
+    category_params: str = Query(..., description="Params de la categoría"),
     service: ExploreService = Depends(get_explore_service)
-):
+) -> Dict[str, Any]:
     """
-    Get category content by params (alias for mood playlists).
+    Obtiene playlists de una categoría (alias de `/explore/moods/{params}`).
     
-    This is the same as /explore/moods/{params} - use the params from a mood/genre category.
+    Usa el `params` de una categoría de mood/género para obtener sus playlists.
     """
     try:
         result = await service.get_mood_playlists(category_params)

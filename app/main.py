@@ -51,8 +51,39 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    description="Production-ready YouTube Music API Service with full ytmusicapi integration",
-    lifespan=lifespan
+    description="""
+    🎵 **YouTube Music API Service** - Servicio completo de API para YouTube Music.
+    
+    ## Características
+    
+    - ✅ **Exploración**: Charts, moods, géneros, playlists públicas
+    - 🔍 **Búsqueda**: Canciones, videos, álbumes, artistas, playlists
+    - 🎧 **Streaming**: URLs directas de audio (best quality)
+    - 📱 **Navegación**: Artistas, álbumes, canciones, letras
+    - 🎙️ **Podcasts**: Canales, episodios y playlists
+    - ⚡ **Rendimiento**: Caché inteligente, circuit breaker, rate limiting
+    
+    ## Optimizaciones
+    
+    - **Caché inteligente**: Metadatos (1 día), Stream URLs (4 horas)
+    - **Circuit breaker**: Protección contra rate limiting de YouTube
+    - **Rate limiting**: 60 requests/minuto por IP
+    - **Compresión**: GZip para reducir ancho de banda
+    
+    ## Documentación
+    
+    - **Swagger UI**: `/docs` - Interfaz interactiva
+    - **ReDoc**: `/redoc` - Documentación alternativa
+    """,
+    lifespan=lifespan,
+    contact={
+        "name": "YouTube Music API Service",
+        "url": "https://github.com/your-repo",
+    },
+    license_info={
+        "name": "MIT",
+    },
+    terms_of_service="https://example.com/terms/",
 )
 
 # Add rate limiter to app state
@@ -90,9 +121,32 @@ async def add_process_time_header(request: Request, call_next):
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
-@app.get("/")
+@app.get(
+    "/",
+    summary="Root endpoint",
+    description="Endpoint raíz con información del servicio y enlaces a documentación.",
+    response_description="Información del servicio",
+    responses={
+        200: {
+            "description": "Servicio online",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "online",
+                        "service": "YouTube Music Service",
+                        "version": "1.0.0",
+                        "auth": "browser.json",
+                        "docs": "/docs",
+                        "api": "/api/v1"
+                    }
+                }
+            }
+        }
+    },
+    tags=["general"]
+)
 async def root():
-    """Root endpoint."""
+    """Endpoint raíz con información del servicio."""
     return {
         "status": "online",
         "service": settings.PROJECT_NAME,
@@ -103,7 +157,23 @@ async def root():
     }
 
 
-@app.get("/health")
+@app.get(
+    "/health",
+    summary="Health check",
+    description="Verifica el estado de salud del servicio. Usado por sistemas de monitoreo y Docker health checks.",
+    response_description="Estado de salud",
+    responses={
+        200: {
+            "description": "Servicio saludable",
+            "content": {
+                "application/json": {
+                    "example": {"status": "healthy"}
+                }
+            }
+        }
+    },
+    tags=["general"]
+)
 async def health_check():
-    """Health check endpoint."""
+    """Health check endpoint para monitoreo."""
     return {"status": "healthy"}
