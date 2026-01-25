@@ -20,14 +20,17 @@ def get_explore_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> ExploreServi
 
 
 @router.get("/")
-async def explore_music(service: ExploreService = Depends(get_explore_service)):
+async def explore_music(
+    include_stream_urls: bool = Query(True, description="Include stream URLs and best thumbnails for charts"),
+    service: ExploreService = Depends(get_explore_service)
+):
     """
     Get explore content (moods, genres, charts).
     
     Returns:
     - moods_genres: Lista de categorías de moods/géneros (cada una tiene 'params' para obtener playlists)
     - home: Contenido de la página principal
-    - charts: Top songs y trending (cada canción tiene 'videoId' para obtener stream)
+    - charts: Top songs y trending (con stream_url y thumbnail si include_stream_urls=true)
     """
     try:
         # Get home with moods
@@ -45,6 +48,23 @@ async def explore_music(service: ExploreService = Depends(get_explore_service)):
         if not trending_data:
             trending_data = top_songs_data
         
+        # Enrich charts with stream URLs and thumbnails
+        if include_stream_urls:
+            from app.services.stream_service import StreamService
+            stream_service = StreamService()
+            
+            if top_songs_data:
+                top_songs_data = await stream_service.enrich_items_with_streams(
+                    top_songs_data, 
+                    include_stream_urls=True
+                )
+            
+            if trending_data:
+                trending_data = await stream_service.enrich_items_with_streams(
+                    trending_data, 
+                    include_stream_urls=True
+                )
+        
         return {
             "moods_genres": home_data.get("moods", []),
             "home": home_data.get("home", []),
@@ -54,7 +74,7 @@ async def explore_music(service: ExploreService = Depends(get_explore_service)):
             },
             "info": {
                 "usage": "Cada categoría en 'moods_genres' tiene un campo 'params'. Usa ese 'params' en /explore/moods/{params} para obtener las playlists de esa categoría.",
-                "charts_usage": "Las canciones en 'charts' tienen 'videoId' que puedes usar en /api/v1/stream/{videoId} para obtener el audio."
+                "charts_usage": "Las canciones en 'charts' incluyen 'stream_url' y 'thumbnail' (mejor calidad) si include_stream_urls=true."
             }
         }
     except Exception as e:
@@ -203,13 +223,15 @@ async def get_mood_playlists(
 @router.get("/charts")
 async def get_charts(
     country: Optional[str] = Query(None, description="Country code (e.g., 'US', 'PE')"),
+    include_stream_urls: bool = Query(True, description="Include stream URLs and best thumbnails"),
     service: ExploreService = Depends(get_explore_service)
 ):
     """
     Get charts (top songs and trending).
     
-    Returns top songs and trending music. Each song has a 'videoId' that can be used
-    in /api/v1/stream/{videoId} to get the audio stream.
+    Returns top songs and trending music with:
+    - stream_url: Direct audio stream URL (best quality)
+    - thumbnail: Best quality thumbnail URL
     """
     try:
         charts = await service.get_charts(country)
@@ -222,6 +244,25 @@ async def get_charts(
         trending_data = charts.get('trending', [])
         if not trending_data:
             trending_data = top_songs_data
+        
+        # Enrich with stream URLs and thumbnails
+        if include_stream_urls:
+            from app.services.stream_service import StreamService
+            stream_service = StreamService()
+            
+            # Enrich top_songs
+            if top_songs_data:
+                top_songs_data = await stream_service.enrich_items_with_streams(
+                    top_songs_data, 
+                    include_stream_urls=True
+                )
+            
+            # Enrich trending
+            if trending_data:
+                trending_data = await stream_service.enrich_items_with_streams(
+                    trending_data, 
+                    include_stream_urls=True
+                )
         
         return {
             "top_songs": top_songs_data,

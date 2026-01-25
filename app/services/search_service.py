@@ -2,6 +2,7 @@
 from typing import Optional, List, Dict, Any
 from ytmusicapi import YTMusic
 import asyncio
+from app.core.cache import cache_result
 
 
 class SearchService:
@@ -10,6 +11,7 @@ class SearchService:
     def __init__(self, ytmusic: YTMusic):
         self.ytmusic = ytmusic
     
+    @cache_result(ttl=1800)
     async def search(
         self,
         query: str,
@@ -28,6 +30,7 @@ class SearchService:
             ignore_spelling=ignore_spelling
         )
     
+    @cache_result(ttl=3600)
     async def get_search_suggestions(self, query: str) -> List[str]:
         """Get search suggestions."""
         return await asyncio.to_thread(self.ytmusic.get_search_suggestions, query)

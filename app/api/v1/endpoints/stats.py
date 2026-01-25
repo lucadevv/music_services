@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends
 from app.core.cache import get_cache_stats
 from app.core.config import get_settings
+from app.core.circuit_breaker import youtube_stream_circuit
 
 router = APIRouter()
 settings = get_settings()
@@ -11,6 +12,7 @@ settings = get_settings()
 async def get_stats():
     """Get service statistics."""
     cache_stats = get_cache_stats()
+    circuit_status = youtube_stream_circuit.get_status()
     
     return {
         "service": settings.PROJECT_NAME,
@@ -21,6 +23,9 @@ async def get_stats():
             "limit_per_hour": settings.RATE_LIMIT_PER_HOUR
         },
         "caching": cache_stats,
+        "circuit_breaker": {
+            "youtube_stream": circuit_status
+        },
         "performance": {
             "compression": settings.ENABLE_COMPRESSION,
             "http_timeout": settings.HTTP_TIMEOUT,

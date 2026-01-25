@@ -1,7 +1,8 @@
 """Service for watch playlists."""
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 from ytmusicapi import YTMusic
 import asyncio
+from app.core.cache import cache_result
 
 
 class WatchService:
@@ -10,6 +11,7 @@ class WatchService:
     def __init__(self, ytmusic: YTMusic):
         self.ytmusic = ytmusic
     
+    @cache_result(ttl=600)
     async def get_watch_playlist(
         self,
         video_id: Optional[str] = None,
