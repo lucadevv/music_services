@@ -1,5 +1,5 @@
 """Playlist endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
 from typing import Optional, Dict, Any
 from ytmusicapi import YTMusic
 
@@ -50,8 +50,8 @@ def get_stream_service() -> StreamService:
     }
 )
 async def get_playlist(
-    playlist_id: str = Query(..., description="ID de la playlist (acepta browseId con prefijo VL)", example="PL..."),
-    limit: int = Query(100, ge=1, le=5000, description="Número máximo de canciones", example=100),
+    playlist_id: str = Path(..., description="ID de la playlist (acepta browseId con prefijo VL)", examples={"example1": {"value": "PL..."}}),
+    limit: int = Query(100, ge=1, le=5000, description="Número máximo de canciones", examples=[100]),
     related: bool = Query(False, description="Incluir canciones relacionadas"),
     suggestions_limit: int = Query(0, ge=0, le=50, description="Límite de sugerencias"),
     include_stream_urls: bool = Query(

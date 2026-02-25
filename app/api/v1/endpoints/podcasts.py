@@ -1,5 +1,5 @@
 """Podcast endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
 from typing import Optional, Dict, Any
 from ytmusicapi import YTMusic
 
@@ -22,8 +22,8 @@ def get_podcast_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> PodcastServi
     responses={200: {"description": "Canal obtenido exitosamente"}, 500: {"description": "Error interno"}}
 )
 async def get_channel(
-    channel_id: str = Query(..., description="ID del canal", example="UC..."),
-    limit: int = Query(25, ge=1, le=100, description="Límite de resultados", example=25),
+    channel_id: str = Path(..., description="ID del canal", examples={"example1": {"value": "UC..."}}),
+    limit: int = Query(25, ge=1, le=100, description="Límite de resultados", examples=[25]),
     service: PodcastService = Depends(get_podcast_service)
 ) -> Dict[str, Any]:
     """Obtiene información de un canal de podcast."""
@@ -41,8 +41,8 @@ async def get_channel(
     responses={200: {"description": "Episodios obtenidos exitosamente"}, 500: {"description": "Error interno"}}
 )
 async def get_channel_episodes(
-    channel_id: str = Query(..., description="ID del canal", example="UC..."),
-    limit: int = Query(25, ge=1, le=100, description="Límite de episodios", example=25),
+    channel_id: str = Path(..., description="ID del canal", examples={"example1": {"value": "UC..."}}),
+    limit: int = Query(25, ge=1, le=100, description="Límite de episodios", examples=[25]),
     params: Optional[str] = Query(None, description="Parámetros de paginación"),
     service: PodcastService = Depends(get_podcast_service)
 ) -> Dict[str, Any]:
@@ -61,8 +61,8 @@ async def get_channel_episodes(
     responses={200: {"description": "Podcast obtenido exitosamente"}, 500: {"description": "Error interno"}}
 )
 async def get_podcast(
-    browse_id: str = Query(..., description="Browse ID del podcast", example="MPAD..."),
-    limit: int = Query(25, ge=1, le=100, description="Límite de episodios", example=25),
+    browse_id: str = Path(..., description="Browse ID del podcast", examples={"example1": {"value": "MPAD..."}}),
+    limit: int = Query(25, ge=1, le=100, description="Límite de episodios", examples=[25]),
     service: PodcastService = Depends(get_podcast_service)
 ) -> Dict[str, Any]:
     """Obtiene información de un podcast específico."""
@@ -80,7 +80,7 @@ async def get_podcast(
     responses={200: {"description": "Episodio obtenido exitosamente"}, 500: {"description": "Error interno"}}
 )
 async def get_episode(
-    browse_id: str = Query(..., description="Browse ID del episodio", example="MPAD..."),
+    browse_id: str = Path(..., description="Browse ID del episodio", examples={"example1": {"value": "MPAD..."}}),
     service: PodcastService = Depends(get_podcast_service)
 ) -> Dict[str, Any]:
     """Obtiene información de un episodio específico de podcast."""
@@ -98,8 +98,8 @@ async def get_episode(
     responses={200: {"description": "Playlist obtenida exitosamente"}, 500: {"description": "Error interno"}}
 )
 async def get_episodes_playlist(
-    browse_id: str = Query(..., description="Browse ID del podcast", example="MPAD..."),
-    limit: int = Query(25, ge=1, le=100, description="Límite de episodios", example=25),
+    browse_id: str = Path(..., description="Browse ID del podcast", examples={"example1": {"value": "MPAD..."}}),
+    limit: int = Query(25, ge=1, le=100, description="Límite de episodios", examples=[25]),
     service: PodcastService = Depends(get_podcast_service)
 ) -> Dict[str, Any]:
     """Obtiene la playlist de episodios de un podcast."""

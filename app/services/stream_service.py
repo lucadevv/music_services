@@ -102,23 +102,12 @@ class StreamService:
         
         try:
             url = f"https://music.youtube.com/watch?v={video_id}"
-            browser_path = Path(self.settings.BROWSER_JSON_PATH)
-            
-            if not browser_path.exists():
-                return {"detail": f"No se encontró el archivo {self.settings.BROWSER_JSON_PATH}"}
-            
-            with open(browser_path, 'r') as f:
-                headers = json.load(f)
-            
-            cookie = headers.pop('cookie', None)
+            # yt-dlp no necesita autenticación para extraer streams públicos
             ydl_opts = {
                 'quiet': True,
                 'no_warnings': True,
-                'format': 'bestaudio/best',
-                'http_headers': headers
+                'format': 'bestaudio/best'
             }
-            if cookie:
-                ydl_opts['cookie'] = cookie
             
             def extract_info():
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:

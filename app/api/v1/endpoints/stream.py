@@ -1,5 +1,5 @@
 """Stream endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from typing import Dict, Any
 from app.services.stream_service import StreamService
 from app.core.circuit_breaker import youtube_stream_circuit
@@ -49,7 +49,7 @@ def get_stream_service() -> StreamService:
     }
 )
 async def get_stream_url(
-    video_id: str = Query(..., description="ID del video/canción", example="rMbATaj7Il8"),
+    video_id: str = Path(..., description="ID del video/canción", examples={"example1": {"value": "rMbATaj7Il8"}}),
     service: StreamService = Depends(get_stream_service)
 ) -> Dict[str, Any]:
     """

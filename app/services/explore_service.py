@@ -2,6 +2,7 @@
 from typing import Optional, List, Dict, Any
 from ytmusicapi import YTMusic
 import asyncio
+import json
 from app.core.cache import cache_result
 
 
@@ -15,10 +16,34 @@ class ExploreService:
     def __init__(self, ytmusic: YTMusic):
         self.ytmusic = ytmusic
     
+    def _handle_ytmusic_error(self, error: Exception, operation: str) -> Exception:
+        """Handle ytmusicapi errors and provide better error messages."""
+        error_msg = str(error)
+        
+        if "Expecting value" in error_msg or "JSON" in error_msg or "line 1 column 1" in error_msg:
+            return Exception(
+                f"Error de autenticación o respuesta inválida de YouTube Music. "
+                f"Verifica que browser.json sea válido y no esté expirado. "
+                f"Operación: {operation}. "
+                f"Error original: {error_msg}"
+            )
+        
+        if "rate" in error_msg.lower() or "429" in error_msg:
+            return Exception(
+                f"Rate limit de YouTube Music. Intenta más tarde. "
+                f"Operación: {operation}"
+            )
+        
+        return Exception(f"Error en {operation}: {error_msg}")
+    
     @cache_result(ttl=86400)
     async def get_mood_categories(self) -> Dict[str, Any]:
         """Get mood categories."""
-        return await asyncio.to_thread(self.ytmusic.get_mood_categories)
+        try:
+            result = await asyncio.to_thread(self.ytmusic.get_mood_categories)
+            return result if result is not None else {}
+        except Exception as e:
+            raise self._handle_ytmusic_error(e, "obtener categorías de moods")
     
     @cache_result(ttl=3600)
     async def get_mood_playlists(self, params: str) -> List[Dict[str, Any]]:
@@ -126,12 +151,22 @@ class ExploreService:
     @cache_result(ttl=1800)
     async def get_charts(self, country: Optional[str] = None) -> Dict[str, Any]:
         """Get charts."""
-        return await asyncio.to_thread(self.ytmusic.get_charts, country)
+        try:
+            result = await asyncio.to_thread(self.ytmusic.get_charts, country)
+            return result if result is not None else {}
+        except Exception as e:
+            raise self._handle_ytmusic_error(e, f"obtener charts (país: {country or 'global'})")
     
     @cache_result(ttl=3600)
     async def get_home_with_moods(self) -> Dict[str, Any]:
         """Get home page with moods extracted."""
-        home = await asyncio.to_thread(self.ytmusic.get_home)
+        try:
+            home = await asyncio.to_thread(self.ytmusic.get_home)
+            if home is None:
+                home = []
+        except Exception as e:
+            raise self._handle_ytmusic_error(e, "obtener home con moods")
+        
         moods = []
         
         for item in home:

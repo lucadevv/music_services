@@ -13,7 +13,6 @@ import time
 
 settings = get_settings()
 
-# Initialize rate limiter
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=[f"{settings.RATE_LIMIT_PER_MINUTE}/minute"] if settings.RATE_LIMIT_ENABLED else [],
@@ -37,14 +36,12 @@ def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
-    # Startup
     print(f"🚀 Starting {settings.PROJECT_NAME} v{settings.VERSION}")
     print(f"📡 API available at http://{settings.HOST}:{settings.PORT}{settings.API_V1_STR}")
     print(f"⚡ Rate Limiting: {'Enabled' if settings.RATE_LIMIT_ENABLED else 'Disabled'}")
     print(f"💾 Caching: {'Enabled' if settings.CACHE_ENABLED else 'Disabled'}")
     print(f"🗜️  Compression: {'Enabled' if settings.ENABLE_COMPRESSION else 'Disabled'}")
     yield
-    # Shutdown
     print(f"👋 Shutting down {settings.PROJECT_NAME}")
 
 
@@ -86,15 +83,11 @@ app = FastAPI(
     terms_of_service="https://example.com/terms/",
 )
 
-# Add rate limiter to app state
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 
-# Compression middleware (reduce bandwidth)
 if settings.ENABLE_COMPRESSION:
     app.add_middleware(GZipMiddleware, minimum_size=1000)
-
-# CORS middleware
 cors_origins = ["*"] if settings.CORS_ORIGINS == "*" else settings.CORS_ORIGINS.split(",")
 cors_methods = ["*"] if settings.CORS_ALLOW_METHODS == "*" else settings.CORS_ALLOW_METHODS.split(",")
 cors_headers = ["*"] if settings.CORS_ALLOW_HEADERS == "*" else settings.CORS_ALLOW_HEADERS.split(",")
@@ -107,7 +100,6 @@ app.add_middleware(
     allow_headers=cors_headers,
 )
 
-# Request timing middleware
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
     """Add processing time header to responses."""
@@ -117,7 +109,6 @@ async def add_process_time_header(request: Request, call_next):
     response.headers["X-Process-Time"] = str(process_time)
     return response
 
-# Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
@@ -135,7 +126,7 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
                         "status": "online",
                         "service": "YouTube Music Service",
                         "version": "1.0.0",
-                        "auth": "browser.json",
+                        "auth": "Browser",
                         "docs": "/docs",
                         "api": "/api/v1"
                     }
@@ -151,7 +142,7 @@ async def root():
         "status": "online",
         "service": settings.PROJECT_NAME,
         "version": settings.VERSION,
-        "auth": "browser.json",
+        "auth": "Browser",
         "docs": "/docs",
         "api": settings.API_V1_STR
     }

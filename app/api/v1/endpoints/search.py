@@ -51,14 +51,14 @@ def get_stream_service() -> StreamService:
     }
 )
 async def search_music(
-    q: str = Query(..., description="Query de búsqueda", example="cumbia peruana"),
+    q: str = Query(..., description="Query de búsqueda", examples=["cumbia peruana"]),
     filter: Optional[str] = Query(
         None, 
         description="Filtro: songs, videos, albums, artists, playlists",
-        example="songs"
+        examples=["songs"]
     ),
     scope: Optional[str] = Query(None, description="Scope de búsqueda"),
-    limit: int = Query(20, ge=1, le=50, description="Número de resultados", example=20),
+    limit: int = Query(20, ge=1, le=50, description="Número de resultados", examples=[20]),
     ignore_spelling: bool = Query(False, description="Ignorar sugerencias de ortografía"),
     include_stream_urls: bool = Query(
         True, 
@@ -129,7 +129,7 @@ async def search_music(
     }
 )
 async def get_search_suggestions(
-    q: str = Query(..., description="Query parcial para obtener sugerencias", example="cumb"),
+    q: str = Query(..., description="Query parcial para obtener sugerencias", examples=["cumb"]),
     service: SearchService = Depends(get_search_service)
 ) -> Dict[str, Any]:
     """Obtiene sugerencias de búsqueda para autocompletado."""
@@ -158,7 +158,7 @@ async def get_search_suggestions(
     }
 )
 async def remove_search_suggestions(
-    q: str = Query(..., description="Query a eliminar de las sugerencias", example="cumbia"),
+    q: str = Query(..., description="Query a eliminar de las sugerencias", examples=["cumbia"]),
     service: SearchService = Depends(get_search_service)
 ) -> Dict[str, Any]:
     """Elimina una sugerencia de búsqueda del historial."""

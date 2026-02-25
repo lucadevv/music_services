@@ -1,5 +1,5 @@
 """Explore endpoints - Public content: charts, moods, genres."""
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
 from typing import Optional, Dict, Any, List
 from ytmusicapi import YTMusic
 
@@ -194,7 +194,7 @@ async def get_mood_categories(
     }
 )
 async def get_mood_playlists(
-    params: str = Query(..., description="Params obtenido de una categoría de mood/género"),
+    params: str = Path(..., description="Params obtenido de una categoría de mood/género", examples={"example1": {"value": "ggMPOg1uX3hRRFdlaEhHU09k"}}),
     genre_name: Optional[str] = Query(
         None, 
         description="Nombre del género (fallback si get_mood_playlists falla)"
@@ -412,7 +412,7 @@ async def get_charts(
     }
 )
 async def get_category(
-    category_params: str = Query(..., description="Params de la categoría"),
+    category_params: str = Path(..., description="Params de la categoría", examples={"example1": {"value": "ggMPOg1uX3hRRFdlaEhHU09k"}}),
     service: ExploreService = Depends(get_explore_service)
 ) -> Dict[str, Any]:
     """

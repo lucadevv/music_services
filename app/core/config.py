@@ -12,45 +12,36 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "YouTube Music Service"
     VERSION: str = "1.0.0"
     
-    # YouTube Music Configuration
     BROWSER_JSON_PATH: str = "browser.json"
-    OAUTH_JSON_PATH: Optional[str] = None
     
-    # CORS Configuration
     CORS_ORIGINS: str = "*"
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: str = "*"
     CORS_ALLOW_HEADERS: str = "*"
     
-    # Server Configuration
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     
-    # Rate Limiting
     RATE_LIMIT_ENABLED: bool = True
-    RATE_LIMIT_PER_MINUTE: int = 60  # Requests per minute per IP
-    RATE_LIMIT_PER_HOUR: int = 1000   # Requests per hour per IP
+    RATE_LIMIT_PER_MINUTE: int = 60
+    RATE_LIMIT_PER_HOUR: int = 1000
     
-    # Caching Configuration
     CACHE_ENABLED: bool = True
-    CACHE_BACKEND: str = "memory"  # "memory" or "redis"
-    CACHE_TTL: int = 300  # 5 minutes default TTL
-    CACHE_MAX_SIZE: int = 1000  # Max items in memory cache
+    CACHE_BACKEND: str = "memory"
+    CACHE_TTL: int = 300
+    CACHE_MAX_SIZE: int = 1000
     
-    # Redis Configuration (if using Redis cache)
-    REDIS_HOST: str = "localhost"  # Use "redis" when running in Docker Compose
+    REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
     REDIS_PASSWORD: Optional[str] = None
     
-    # HTTP Client Configuration
-    HTTP_TIMEOUT: int = 30  # seconds
+    HTTP_TIMEOUT: int = 30
     HTTP_MAX_CONNECTIONS: int = 100
     HTTP_MAX_KEEPALIVE_CONNECTIONS: int = 20
     
-    # Performance
     ENABLE_COMPRESSION: bool = True
-    MAX_WORKERS: int = 10  # Max concurrent workers for asyncio.to_thread
+    MAX_WORKERS: int = 10
     
     class Config:
         env_file = ".env"

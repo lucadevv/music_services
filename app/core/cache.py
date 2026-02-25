@@ -52,7 +52,11 @@ def cache_result(ttl: Optional[int] = None):
                     _cache_timestamps.pop(cache_key, None)
             
             # Execute function and cache result
-            result = await func(*args, **kwargs)
+            try:
+                result = await func(*args, **kwargs)
+            except Exception:
+                # Don't cache errors, propagate them
+                raise
             
             # Store in cache (respect max size)
             if len(_cache) >= settings.CACHE_MAX_SIZE:

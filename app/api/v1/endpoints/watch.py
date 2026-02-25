@@ -48,9 +48,9 @@ def get_stream_service() -> StreamService:
     }
 )
 async def get_watch_playlist(
-    video_id: Optional[str] = Query(None, description="ID del video para iniciar", example="rMbATaj7Il8"),
-    playlist_id: Optional[str] = Query(None, description="ID de la playlist", example="PL..."),
-    limit: int = Query(25, ge=1, le=100, description="Número de canciones", example=25),
+    video_id: Optional[str] = Query(None, description="ID del video para iniciar", examples=["rMbATaj7Il8"]),
+    playlist_id: Optional[str] = Query(None, description="ID de la playlist", examples=["PL..."]),
+    limit: int = Query(25, ge=1, le=100, description="Número de canciones", examples=[25]),
     radio: bool = Query(False, description="Obtener playlist de radio"),
     shuffle: bool = Query(False, description="Obtener playlist en modo shuffle"),
     include_stream_urls: bool = Query(

@@ -1,5 +1,5 @@
 """Browse endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
 from typing import Optional, List, Dict, Any
 from ytmusicapi import YTMusic
 
@@ -45,7 +45,7 @@ async def get_home(
     responses={200: {"description": "Artista obtenido exitosamente"}, 500: {"description": "Error interno"}}
 )
 async def get_artist(
-    channel_id: str = Query(..., description="ID del canal del artista", example="UC..."),
+    channel_id: str = Path(..., description="ID del canal del artista", examples={"example1": {"value": "UC..."}}),
     service: BrowseService = Depends(get_browse_service)
 ) -> Dict[str, Any]:
     """Obtiene información completa de un artista."""
@@ -63,7 +63,7 @@ async def get_artist(
     responses={200: {"description": "Álbumes obtenidos exitosamente"}, 500: {"description": "Error interno"}}
 )
 async def get_artist_albums(
-    channel_id: str = Query(..., description="ID del canal del artista", example="UC..."),
+    channel_id: str = Path(..., description="ID del canal del artista", examples={"example1": {"value": "UC..."}}),
     params: Optional[str] = Query(None, description="Parámetros de paginación"),
     service: BrowseService = Depends(get_browse_service)
 ) -> Dict[str, Any]:
@@ -103,7 +103,7 @@ async def get_artist_albums(
     }
 )
 async def get_album(
-    album_id: str = Query(..., description="ID del álbum", example="MPREb..."),
+    album_id: str = Path(..., description="ID del álbum", examples={"example1": {"value": "MPREb..."}}),
     include_stream_urls: bool = Query(
         True, 
         description="Incluir stream URLs y mejores thumbnails para tracks"
@@ -148,7 +148,7 @@ async def get_album(
     responses={200: {"description": "Browse ID obtenido exitosamente"}, 500: {"description": "Error interno"}}
 )
 async def get_album_browse_id(
-    album_id: str = Query(..., description="ID del álbum", example="MPREb..."),
+    album_id: str = Path(..., description="ID del álbum", examples={"example1": {"value": "MPREb..."}}),
     service: BrowseService = Depends(get_browse_service)
 ) -> Dict[str, str]:
     """Obtiene el browse ID de un álbum."""
@@ -167,7 +167,7 @@ async def get_album_browse_id(
     responses={200: {"description": "Canción obtenida exitosamente"}, 500: {"description": "Error interno"}}
 )
 async def get_song(
-    video_id: str = Query(..., description="ID del video/canción", example="rMbATaj7Il8"),
+    video_id: str = Path(..., description="ID del video/canción", examples={"example1": {"value": "rMbATaj7Il8"}}),
     signature_timestamp: Optional[int] = Query(None, description="Timestamp de firma (opcional)"),
     service: BrowseService = Depends(get_browse_service)
 ) -> Dict[str, Any]:
@@ -203,7 +203,7 @@ async def get_song(
     }
 )
 async def get_song_related(
-    video_id: str = Query(..., description="ID del video/canción", example="rMbATaj7Il8"),
+    video_id: str = Path(..., description="ID del video/canción", examples={"example1": {"value": "rMbATaj7Il8"}}),
     include_stream_urls: bool = Query(
         True, 
         description="Incluir stream URLs y mejores thumbnails"
@@ -241,7 +241,7 @@ async def get_song_related(
     responses={200: {"description": "Letras obtenidas exitosamente"}, 500: {"description": "Error interno"}}
 )
 async def get_lyrics(
-    browse_id: str = Query(..., description="Browse ID de la canción", example="MPAD..."),
+    browse_id: str = Path(..., description="Browse ID de la canción", examples={"example1": {"value": "MPAD..."}}),
     service: BrowseService = Depends(get_browse_service)
 ) -> Dict[str, Any]:
     """Obtiene las letras de una canción."""
