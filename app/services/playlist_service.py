@@ -2,38 +2,34 @@
 from typing import Optional, Dict, Any
 from ytmusicapi import YTMusic
 import asyncio
-import json
+
+from app.services.base_service import BaseService
 from app.core.cache import cache_result
+from app.core.exceptions import ResourceNotFoundError, YTMusicServiceException
 
 
-class PlaylistService:
+class PlaylistService(BaseService):
     """Service for reading public playlists."""
     
     def __init__(self, ytmusic: YTMusic):
-        self.ytmusic = ytmusic
-    
-    def _handle_ytmusic_error(self, error: Exception, operation: str) -> Exception:
-        """Handle ytmusicapi errors and provide better error messages."""
-        error_msg = str(error)
+        """
+        Initialize the playlist service.
         
-        if "Expecting value" in error_msg or "JSON" in error_msg or "line 1 column 1" in error_msg:
-            return Exception(
-                f"Error de autenticación o respuesta inválida de YouTube Music. "
-                f"Verifica que browser.json sea válido y no esté expirado. "
-                f"Operación: {operation}. "
-                f"Error original: {error_msg}"
-            )
-        
-        if "rate" in error_msg.lower() or "429" in error_msg:
-            return Exception(
-                f"Rate limit de YouTube Music. Intenta más tarde. "
-                f"Operación: {operation}"
-            )
-        
-        return Exception(f"Error en {operation}: {error_msg}")
+        Args:
+            ytmusic: YTMusic client instance.
+        """
+        super().__init__(ytmusic)
     
     def _normalize_playlist_id(self, playlist_id: str) -> str:
-        """Normalize playlist ID - remove VL prefix if present."""
+        """
+        Normalize playlist ID - remove VL prefix if present.
+        
+        Args:
+            playlist_id: Raw playlist ID.
+        
+        Returns:
+            Normalized playlist ID.
+        """
         if playlist_id.startswith('VL'):
             return playlist_id[2:]
         return playlist_id
@@ -46,8 +42,21 @@ class PlaylistService:
         related: bool = False,
         suggestions_limit: int = 0
     ) -> Dict[str, Any]:
-        """Get playlist information."""
+        """
+        Get playlist information.
+        
+        Args:
+            playlist_id: Playlist ID.
+            limit: Maximum number of tracks.
+            related: Include related songs.
+            suggestions_limit: Limit for suggestions.
+        
+        Returns:
+            Playlist information dictionary.
+        """
         normalized_id = self._normalize_playlist_id(playlist_id)
+        self._log_operation("get_playlist", playlist_id=normalized_id, limit=limit)
+        
         try:
             result = await asyncio.to_thread(
                 self.ytmusic.get_playlist,
@@ -57,7 +66,16 @@ class PlaylistService:
                 suggestions_limit
             )
             if result is None:
-                raise Exception(f"Playlist no encontrada: {playlist_id}")
+                raise ResourceNotFoundError(
+                    message="Playlist no encontrada.",
+                    details={"resource_type": "playlist", "playlist_id": playlist_id}
+                )
+            
+            track_count = len(result.get('tracks', []))
+            self.logger.info(f"Retrieved playlist {playlist_id}: {track_count} tracks")
             return result
+        except YTMusicServiceException:
+            # Re-raise custom exceptions directly
+            raise
         except Exception as e:
             raise self._handle_ytmusic_error(e, f"obtener playlist {playlist_id}")

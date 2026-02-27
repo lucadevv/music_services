@@ -3,12 +3,20 @@ from typing import Optional, List, Dict, Any
 from ytmusicapi import YTMusic
 import asyncio
 
+from app.services.base_service import BaseService
 
-class LibraryService:
+
+class LibraryService(BaseService):
     """Service for library management - simplified for public content only."""
     
     def __init__(self, ytmusic: YTMusic):
-        self.ytmusic = ytmusic
+        """
+        Initialize the library service.
+        
+        Args:
+            ytmusic: YTMusic client instance.
+        """
+        super().__init__(ytmusic)
     
     # Solo funciones esenciales si son necesarias
     # La mayoría de funciones de library requieren autenticación y son para contenido personal

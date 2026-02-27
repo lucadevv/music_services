@@ -1,15 +1,32 @@
 """Main FastAPI application."""
+# Standard library
+import time
 from contextlib import asynccontextmanager
+
+# Third-party
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from fastapi.exceptions import RequestValidationError
+from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+
+# Local imports
 from app.core.config import get_settings
+from app.core.logging_config import setup_logging, get_logger
+from app.core.exceptions import YTMusicServiceException
+from app.core.exception_handlers import (
+    ytmusic_exception_handler,
+    validation_exception_handler,
+    generic_exception_handler,
+)
 from app.api.v1.router import api_router
-import time
+
+# Setup logging first
+setup_logging()
+logger = get_logger(__name__)
 
 settings = get_settings()
 
@@ -19,9 +36,10 @@ limiter = Limiter(
     storage_uri="memory://"
 )
 
-# Custom rate limit handler
+
 def rate_limit_handler(request: Request, exc: RateLimitExceeded):
     """Custom handler for rate limit exceeded."""
+    logger.warning(f"Rate limit exceeded for {request.client.host}")
     return JSONResponse(
         status_code=429,
         content={
@@ -36,13 +54,13 @@ def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
-    print(f"🚀 Starting {settings.PROJECT_NAME} v{settings.VERSION}")
-    print(f"📡 API available at http://{settings.HOST}:{settings.PORT}{settings.API_V1_STR}")
-    print(f"⚡ Rate Limiting: {'Enabled' if settings.RATE_LIMIT_ENABLED else 'Disabled'}")
-    print(f"💾 Caching: {'Enabled' if settings.CACHE_ENABLED else 'Disabled'}")
-    print(f"🗜️  Compression: {'Enabled' if settings.ENABLE_COMPRESSION else 'Disabled'}")
+    logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION}")
+    logger.info(f"API available at http://{settings.HOST}:{settings.PORT}{settings.API_V1_STR}")
+    logger.info(f"Rate Limiting: {'Enabled' if settings.RATE_LIMIT_ENABLED else 'Disabled'}")
+    logger.info(f"Caching: {'Enabled' if settings.CACHE_ENABLED else 'Disabled'}")
+    logger.info(f"Compression: {'Enabled' if settings.ENABLE_COMPRESSION else 'Disabled'}")
     yield
-    print(f"👋 Shutting down {settings.PROJECT_NAME}")
+    logger.info(f"Shutting down {settings.PROJECT_NAME}")
 
 
 app = FastAPI(
@@ -67,6 +85,17 @@ app = FastAPI(
     - **Rate limiting**: 60 requests/minuto por IP
     - **Compresión**: GZip para reducir ancho de banda
     
+    ## Manejo de Errores
+    
+    La API utiliza códigos de error consistentes:
+    - `VALIDATION_ERROR` (400): Error de validación en parámetros
+    - `AUTHENTICATION_ERROR` (401): Error de autenticación con YouTube
+    - `NOT_FOUND` (404): Recurso no encontrado
+    - `RATE_LIMIT_ERROR` (429): Límite de peticiones excedido
+    - `EXTERNAL_SERVICE_ERROR` (502): Error de servicio externo
+    - `SERVICE_UNAVAILABLE` (503): Servicio temporalmente no disponible
+    - `INTERNAL_ERROR` (500): Error interno del servidor
+    
     ## Documentación
     
     - **Swagger UI**: `/docs` - Interfaz interactiva
@@ -83,11 +112,19 @@ app = FastAPI(
     terms_of_service="https://example.com/terms/",
 )
 
+# Register exception handlers for custom exceptions
+app.add_exception_handler(YTMusicServiceException, ytmusic_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+# Uncomment to catch all unhandled exceptions (recommended for production)
+# app.add_exception_handler(Exception, generic_exception_handler)
+
+# Register slowapi rate limit handler
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 
 if settings.ENABLE_COMPRESSION:
     app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 cors_origins = ["*"] if settings.CORS_ORIGINS == "*" else settings.CORS_ORIGINS.split(",")
 cors_methods = ["*"] if settings.CORS_ALLOW_METHODS == "*" else settings.CORS_ALLOW_METHODS.split(",")
 cors_headers = ["*"] if settings.CORS_ALLOW_HEADERS == "*" else settings.CORS_ALLOW_HEADERS.split(",")
@@ -100,6 +137,7 @@ app.add_middleware(
     allow_headers=cors_headers,
 )
 
+
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
     """Add processing time header to responses."""
@@ -108,6 +146,7 @@ async def add_process_time_header(request: Request, call_next):
     process_time = time.time() - start_time
     response.headers["X-Process-Time"] = str(process_time)
     return response
+
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
@@ -138,6 +177,7 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 )
 async def root():
     """Endpoint raíz con información del servicio."""
+    logger.debug("Root endpoint accessed")
     return {
         "status": "online",
         "service": settings.PROJECT_NAME,

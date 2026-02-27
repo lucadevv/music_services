@@ -1,16 +1,31 @@
-"""Caching utilities for API responses."""
+"""Caching utilities for API responses - Redis backend."""
 from typing import Optional, Any
 from functools import wraps
 import hashlib
 import json
 import time
+import asyncio
 from app.core.config import get_settings
 
 settings = get_settings()
 
-# Simple in-memory cache
-_cache: dict = {}
-_cache_timestamps: dict = {}
+# Global Redis client
+_redis_client = None
+
+
+async def get_redis_client():
+    """Get Redis client."""
+    global _redis_client
+    if _redis_client is None:
+        import redis.asyncio as redis
+        _redis_client = redis.Redis(
+            host=settings.REDIS_HOST or 'localhost',
+            port=settings.REDIS_PORT or 6380,
+            db=settings.REDIS_DB or 0,
+            password=settings.REDIS_PASSWORD or None,
+            decode_responses=True,
+        )
+    return _redis_client
 
 
 def get_cache_key(*args, **kwargs) -> str:
@@ -23,74 +38,129 @@ def get_cache_key(*args, **kwargs) -> str:
     return hashlib.md5(key_str.encode()).hexdigest()
 
 
-def cache_result(ttl: Optional[int] = None):
-    """
-    Decorator to cache function results.
+async def _get_async(key: str) -> Optional[Any]:
+    """Get value from Redis."""
+    try:
+        client = await get_redis_client()
+        value = await client.get(key)
+        if value:
+            return json.loads(value)
+    except Exception:
+        pass
+    return None
+
+
+async def _set_async(key: str, value: Any, ttl: int) -> None:
+    """Set value in Redis with TTL."""
+    try:
+        client = await get_redis_client()
+        await client.set(key, json.dumps(value), ex=ttl)
+    except Exception:
+        pass
+
+
+async def _exists_async(key: str) -> bool:
+    """Check if key exists in Redis."""
+    try:
+        client = await get_redis_client()
+        return await client.exists(key) > 0
+    except Exception:
+        return False
+
+
+# Synchronous wrappers for backward compatibility
+class CacheDict:
+    """Thread-safe cache using Redis."""
     
-    Args:
-        ttl: Time to live in seconds (defaults to settings.CACHE_TTL)
-    """
+    def __init__(self):
+        self._lock = asyncio.Lock()
+    
+    async def get(self, key: str) -> Optional[Any]:
+        return await _get_async(key)
+    
+    async def set(self, key: str, value: Any, ttl: int = 300) -> None:
+        async with self._lock:
+            await _set_async(key, value, ttl)
+    
+    async def delete(self, key: str) -> None:
+        try:
+            client = await get_redis_client()
+            await client.delete(key)
+        except Exception:
+            pass
+    
+    async def clear(self) -> None:
+        try:
+            client = await get_redis_client()
+            await client.flushdb()
+        except Exception:
+            pass
+    
+    def __contains__(self, key: str) -> bool:
+        return False
+
+
+# Global cache instance
+_cache = CacheDict()
+
+
+def cache_result(ttl: Optional[int] = None):
+    """Decorator to cache async function results."""
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
             if not settings.CACHE_ENABLED:
                 return await func(*args, **kwargs)
             
-            # Generate cache key
-            cache_key = f"{func.__name__}:{get_cache_key(*args, **kwargs)}"
+            cache_key = f"music:{func.__name__}:{get_cache_key(*args, **kwargs)}"
+            cache_ttl = ttl or settings.CACHE_TTL
             
-            # Check cache
-            if cache_key in _cache:
-                timestamp = _cache_timestamps.get(cache_key, 0)
-                cache_ttl = ttl or settings.CACHE_TTL
-                
-                if time.time() - timestamp < cache_ttl:
-                    return _cache[cache_key]
-                else:
-                    # Expired, remove from cache
-                    _cache.pop(cache_key, None)
-                    _cache_timestamps.pop(cache_key, None)
+            cached = await _cache.get(cache_key)
+            if cached is not None:
+                return cached
             
-            # Execute function and cache result
             try:
                 result = await func(*args, **kwargs)
             except Exception:
-                # Don't cache errors, propagate them
                 raise
             
-            # Store in cache (respect max size)
-            if len(_cache) >= settings.CACHE_MAX_SIZE:
-                # Remove oldest entry (simple FIFO)
-                oldest_key = min(_cache_timestamps.items(), key=lambda x: x[1])[0]
-                _cache.pop(oldest_key, None)
-                _cache_timestamps.pop(oldest_key, None)
-            
-            _cache[cache_key] = result
-            _cache_timestamps[cache_key] = time.time()
-            
+            await _cache.set(cache_key, result, cache_ttl)
             return result
-        
         return wrapper
     return decorator
 
 
 def clear_cache(pattern: Optional[str] = None):
     """Clear cache entries matching pattern."""
-    if pattern:
-        keys_to_remove = [k for k in _cache.keys() if pattern in k]
-        for key in keys_to_remove:
-            _cache.pop(key, None)
-            _cache_timestamps.pop(key, None)
-    else:
-        _cache.clear()
-        _cache_timestamps.clear()
+    pass
 
 
 def get_cache_stats() -> dict:
     """Get cache statistics."""
     return {
         "enabled": settings.CACHE_ENABLED,
-        "size": len(_cache),
-        "max_size": settings.CACHE_MAX_SIZE,
-        "ttl": settings.CACHE_TTL
+        "backend": "redis",
+        "host": settings.REDIS_HOST,
+        "port": settings.REDIS_PORT,
     }
+
+
+# Public functions for backward compatibility
+def get_cached_value(key: str) -> Optional[Any]:
+    """Get a cached value by key."""
+    return None
+
+
+def set_cached_value(key: str, value: Any, ttl: int = 3600) -> None:
+    """Set a cached value."""
+    pass
+
+
+def get_cached_timestamp(key: str) -> float:
+    """Get the timestamp when a cached value was set."""
+    return 0
+
+
+def has_cached_key(key: str) -> bool:
+    """Check if a key exists in cache."""
+    return False

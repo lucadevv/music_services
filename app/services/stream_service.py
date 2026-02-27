@@ -1,148 +1,265 @@
-"""Service for streaming audio."""
-import json
+"""Service for streaming audio with Redis caching."""
 import time
 from typing import Optional, Dict, Any, List
-from pathlib import Path
 import asyncio
 import yt_dlp
+
+from app.services.base_service import BaseService
 from app.core.config import get_settings
-from app.core.cache import _cache, _cache_timestamps
+from app.core.cache_redis import (
+    get_cached_value,
+    set_cached_value,
+    get_cached_timestamp,
+    has_cached_key,
+)
 from app.core.circuit_breaker import youtube_stream_circuit
+from app.core.exceptions import (
+    CircuitBreakerError,
+    RateLimitError,
+    ExternalServiceError,
+    ValidationError,
+)
 
 
-class StreamService:
-    """Service for audio streaming with intelligent caching."""
+class StreamService(BaseService):
+    """Service for audio streaming with Redis caching."""
     
-    METADATA_TTL = 86400  # 1 día - metadatos no cambian
-    STREAM_URL_TTL = 14400  # 4 horas - URLs expiran
+    # TTL para diferentes tipos de datos
+    METADATA_TTL = 86400  # 24 horas - metadatos no cambian
+    STREAM_URL_TTL = 7200  # 2 horas - URLs expiran (reducido de 4h para evitar 403)
     
     def __init__(self):
+        """Initialize the stream service."""
+        super().__init__()
         self.settings = get_settings()
     
     def _get_metadata_cache_key(self, video_id: str) -> str:
-        """Cache key for metadata (long TTL)."""
-        return f"stream_metadata:{video_id}"
+        """Generate cache key for metadata."""
+        return f"music:stream:metadata:{video_id}"
     
     def _get_stream_url_cache_key(self, video_id: str) -> str:
-        """Cache key for stream URL (short TTL)."""
-        return f"stream_url:{video_id}"
+        """Generate cache key for stream URL."""
+        return f"music:stream:url:{video_id}"
     
-    def _get_cached_metadata(self, video_id: str) -> Optional[Dict[str, Any]]:
-        """Get cached metadata if available and not expired."""
+    async def _get_cached_metadata(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """Get cached metadata if available and not expired (async)."""
         if not self.settings.CACHE_ENABLED:
             return None
         
         cache_key = self._get_metadata_cache_key(video_id)
-        if cache_key not in _cache:
-            return None
         
-        timestamp = _cache_timestamps.get(cache_key, 0)
-        if time.time() - timestamp < self.METADATA_TTL:
-            return _cache[cache_key]
+        try:
+            # Check if key exists
+            if not await has_cached_key(cache_key):
+                return None
+            
+            # Get timestamp
+            timestamp = await get_cached_timestamp(cache_key)
+            if timestamp > 0 and (time.time() - timestamp) < self.METADATA_TTL:
+                cached_data = await get_cached_value(cache_key)
+                if cached_data:
+                    self.logger.info(f"✅ Cache HIT for metadata: {video_id}")
+                    return cached_data
+        except Exception as e:
+            self.logger.warning(f"Error getting cached metadata: {e}")
         
         return None
     
-    def _get_cached_stream_url(self, video_id: str) -> Optional[str]:
-        """Get cached stream URL if available and not expired."""
+    async def _get_cached_stream_url(self, video_id: str) -> Optional[str]:
+        """Get cached stream URL if available and not expired (async)."""
         if not self.settings.CACHE_ENABLED:
             return None
         
         cache_key = self._get_stream_url_cache_key(video_id)
-        if cache_key not in _cache:
-            return None
         
-        timestamp = _cache_timestamps.get(cache_key, 0)
-        if time.time() - timestamp < self.STREAM_URL_TTL:
-            return _cache[cache_key]
+        try:
+            # Check if key exists
+            if not await has_cached_key(cache_key):
+                self.logger.debug(f"Cache MISS (no key) for stream URL: {video_id}")
+                return None
+            
+            # Get timestamp to check TTL
+            timestamp = await get_cached_timestamp(cache_key)
+            if timestamp > 0:
+                elapsed = time.time() - timestamp
+                if elapsed < self.STREAM_URL_TTL:
+                    cached_url = await get_cached_value(cache_key)
+                    if cached_url:
+                        remaining = int(self.STREAM_URL_TTL - elapsed)
+                        self.logger.info(f"✅ Cache HIT for stream URL: {video_id} (expires in {remaining}s)")
+                        return cached_url
+                    else:
+                        self.logger.warning(f"Cache key exists but value is None for: {video_id}")
+                else:
+                    self.logger.debug(f"Cache EXPIRED for stream URL: {video_id} (elapsed: {int(elapsed)}s)")
+            else:
+                self.logger.debug(f"Cache has no timestamp for: {video_id}")
+        except Exception as e:
+            self.logger.warning(f"Error getting cached stream URL: {e}")
         
         return None
     
-    def _cache_metadata(self, video_id: str, metadata: Dict[str, Any]):
-        """Cache metadata with long TTL."""
+    async def _cache_metadata(self, video_id: str, metadata: Dict[str, Any]) -> None:
+        """Cache metadata with long TTL (async)."""
         if not self.settings.CACHE_ENABLED:
             return
         
         cache_key = self._get_metadata_cache_key(video_id)
-        _cache[cache_key] = metadata
-        _cache_timestamps[cache_key] = time.time()
+        try:
+            await set_cached_value(cache_key, metadata, self.METADATA_TTL)
+            self.logger.debug(f"Cached metadata for: {video_id} (TTL: {self.METADATA_TTL}s)")
+        except Exception as e:
+            self.logger.warning(f"Error caching metadata: {e}")
     
-    def _cache_stream_url(self, video_id: str, stream_url: str):
-        """Cache stream URL with short TTL."""
+    async def _cache_stream_url(self, video_id: str, stream_url: str) -> None:
+        """Cache stream URL with TTL (async)."""
         if not self.settings.CACHE_ENABLED:
             return
         
         cache_key = self._get_stream_url_cache_key(video_id)
-        _cache[cache_key] = stream_url
-        _cache_timestamps[cache_key] = time.time()
-    
-    async def get_stream_url(self, video_id: str) -> Dict[str, Any]:
+        try:
+            await set_cached_value(cache_key, stream_url, self.STREAM_URL_TTL)
+            self.logger.info(f"💾 Cached stream URL for: {video_id} (TTL: {self.STREAM_URL_TTL}s)")
+        except Exception as e:
+            self.logger.warning(f"Error caching stream URL: {e}")
+
+    async def get_stream_url(self, video_id: str, bypass_cache: bool = False) -> Dict[str, Any]:
         """
         Get audio stream URL with intelligent caching.
         
         Strategy:
-        1. Check cached metadata (1 day TTL)
-        2. Check cached stream URL (4 hours TTL)
+        1. Check cached metadata (24 hours TTL)
+        2. Check cached stream URL (2 hours TTL)
         3. If both cached and valid, return immediately (0 YouTube calls)
         4. If metadata cached but stream expired, refresh only stream URL
         5. If nothing cached, fetch everything from YouTube
+        
+        Args:
+            video_id: Video ID.
+            bypass_cache: If True, ignore cache and fetch fresh URL.
+        
+        Returns:
+            Dictionary with stream URL and metadata.
+        
+        Raises:
+            CircuitBreakerError: If circuit breaker is open.
+            RateLimitError: If rate limited by YouTube.
+            ExternalServiceError: If error fetching stream.
         """
+        self._log_operation("get_stream_url", video_id=video_id)
+        
+        # Check circuit breaker first
         if youtube_stream_circuit.is_open():
             status = youtube_stream_circuit.get_status()
-            raise Exception(
-                f"YouTube API está rate-limited. "
-                f"Espera {status['remaining_time_seconds']} segundos. "
-                f"Estado: {status['state']}"
+            raise CircuitBreakerError(
+                message="Servicio temporalmente no disponible debido a sobrecarga.",
+                details={
+                    "retry_after": status['remaining_time_seconds'],
+                    "state": status['state'],
+                    "operation": "get_stream_url"
+                }
             )
         
-        cached_metadata = self._get_cached_metadata(video_id)
-        cached_stream_url = self._get_cached_stream_url(video_id)
+        # Try to get from cache first (unless bypass)
+        if not bypass_cache:
+            cached_metadata = await self._get_cached_metadata(video_id)
+            cached_stream_url = await self._get_cached_stream_url(video_id)
+            
+            if cached_metadata and cached_stream_url:
+                self.logger.info(f"🎯 Fully cached response for: {video_id}")
+                return {**cached_metadata, "url": cached_stream_url, "from_cache": True}
+            elif cached_stream_url:
+                # Stream URL cached but no metadata (shouldn't happen, but handle it)
+                self.logger.info(f"⚡ Stream URL cached for: {video_id}")
+                return {"url": cached_stream_url, "from_cache": True}
         
-        if cached_metadata and cached_stream_url:
-            return {**cached_metadata, "url": cached_stream_url}
+        self.logger.info(f"🔄 Fetching fresh stream URL for: {video_id} (bypass_cache={bypass_cache})")
         
         try:
-            url = f"https://music.youtube.com/watch?v={video_id}"
-            # yt-dlp no necesita autenticación para extraer streams públicos
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+            
+            # Configuración de yt-dlp optimizada
             ydl_opts = {
                 'quiet': True,
                 'no_warnings': True,
-                'format': 'bestaudio/best'
+                'format': 'bestaudio/best',
+                'nocheckcertificate': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android'],
+                    }
+                },
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.43 Mobile Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                },
+                'socket_timeout': 30,
+                'retries': 3,
             }
             
             def extract_info():
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    return ydl.extract_info(url, download=False)
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        return ydl.extract_info(video_url, download=False)
+                except Exception as e:
+                    self.logger.error(f"yt-dlp extraction error: {str(e)}")
+                    raise
             
             info = await asyncio.to_thread(extract_info)
             
+            # Buscar formato de audio
             audio_url = None
-            for f in info.get('adaptive_formats', []):
+            
+            # Primero buscar en formats
+            formats = info.get('formats') or []
+            for f in formats:
                 if f.get('acodec') != 'none' and f.get('vcodec') == 'none':
                     audio_url = f['url']
+                    self.logger.debug(f"Found audio in formats: {f.get('format_note', 'unknown')}")
                     break
             
+            # Si no hay en formats, buscar en adaptive formats
             if not audio_url:
-                for f in info.get('formats', []):
-                    if f.get('acodec') != 'none':
+                adaptive_formats = info.get('adaptive_formats') or []
+                for f in adaptive_formats:
+                    if f.get('acodec') != 'none' and f.get('vcodec') == 'none':
                         audio_url = f['url']
+                        self.logger.debug(f"Found audio in adaptive format: {f.get('format_note', 'unknown')}")
                         break
             
+            # Último recurso
             if not audio_url:
-                return {"detail": "yt-dlp no pudo obtener el stream. Verifica el ID o tus cookies."}
+                if info.get('url'):
+                    audio_url = info['url']
+                    self.logger.debug("Using direct URL from info")
+            
+            if not audio_url:
+                self.logger.warning(f"yt-dlp could not get stream for: {video_id}")
+                raise ExternalServiceError(
+                    message="No se pudo obtener el stream de audio. Verifica el ID del video.",
+                    details={"video_id": video_id, "operation": "get_stream_url"}
+                )
             
             youtube_stream_circuit.record_success()
             
+            # Extraer metadatos
             metadata = {
                 "title": info.get('title'),
-                "artist": info.get('artist', info.get('uploader')),
+                "artist": info.get('artist', info.get('uploader', 'Unknown Artist')),
                 "duration": info.get('duration'),
                 "thumbnail": info.get('thumbnail')
             }
             
-            self._cache_metadata(video_id, metadata)
-            self._cache_stream_url(video_id, audio_url)
+            # Cache both metadata and stream URL
+            await self._cache_metadata(video_id, metadata)
+            await self._cache_stream_url(video_id, audio_url)
             
-            return {**metadata, "url": audio_url}
+            self.logger.info(f"✅ Retrieved fresh stream URL for: {video_id}")
+            return {**metadata, "url": audio_url, "from_cache": False}
+        
+        except (CircuitBreakerError, RateLimitError, ExternalServiceError, ValidationError):
+            raise
         
         except Exception as e:
             error_message = str(e)
@@ -154,12 +271,20 @@ class StreamService:
             if is_rate_limit:
                 youtube_stream_circuit.record_failure(error_message)
                 status = youtube_stream_circuit.get_status()
-                raise Exception(
-                    f"YouTube API rate-limited: {error_message}. "
-                    f"Circuit breaker activado. Espera {status['remaining_time_seconds']} segundos."
+                self.logger.error(f"Rate limit hit for stream: {video_id}")
+                raise RateLimitError(
+                    message="Límite de peticiones excedido. Intenta más tarde.",
+                    details={
+                        "operation": "get_stream_url",
+                        "retry_after": status['remaining_time_seconds']
+                    }
                 )
             
-            raise Exception(f"Error obteniendo stream: {error_message}")
+            self.logger.error(f"Error getting stream for {video_id}: {error_message}")
+            raise ExternalServiceError(
+                message="Error obteniendo stream de audio. Intenta más tarde.",
+                details={"operation": "get_stream_url", "video_id": video_id}
+            )
     
     def _get_best_thumbnail(self, item: Dict[str, Any]) -> Optional[str]:
         """Extract the best quality thumbnail from an item."""
@@ -219,6 +344,8 @@ class StreamService:
         if not items:
             return []
         
+        self.logger.debug(f"Enriching {len(items)} items with streams")
+        
         items_with_thumbnails = []
         for item in items:
             enriched = item.copy()
@@ -259,6 +386,7 @@ class StreamService:
             
             enriched_items.append(enriched_item)
         
+        self.logger.info(f"Enriched {len(enriched_items)} items, {len(video_id_to_stream)} with stream URLs")
         return enriched_items
     
     async def _safe_get_stream_url(self, video_id: str) -> Dict[str, Any]:
@@ -267,3 +395,49 @@ class StreamService:
             return await self.get_stream_url(video_id)
         except Exception:
             return {}
+    
+    async def is_cached(self, video_id: str) -> bool:
+        """
+        Check if stream URL is cached for a video.
+        
+        Args:
+            video_id: Video ID to check.
+            
+        Returns:
+            True if cached, False otherwise.
+        """
+        cache_key = self._get_stream_url_cache_key(video_id)
+        
+        try:
+            if await has_cached_key(cache_key):
+                # Also check if not expired
+                timestamp = await get_cached_timestamp(cache_key)
+                if timestamp > 0:
+                    elapsed = time.time() - timestamp
+                    return elapsed < self.STREAM_URL_TTL
+        except Exception:
+            pass
+        
+        return False
+    
+    async def get_cache_ttl(self, video_id: str) -> int:
+        """
+        Get remaining TTL for cached stream URL.
+        
+        Args:
+            video_id: Video ID to check.
+            
+        Returns:
+            Seconds remaining in cache, or 0 if not cached.
+        """
+        cache_key = self._get_stream_url_cache_key(video_id)
+        
+        try:
+            timestamp = await get_cached_timestamp(cache_key)
+            if timestamp > 0:
+                remaining = int(self.STREAM_URL_TTL - (time.time() - timestamp))
+                return max(0, remaining)
+        except Exception:
+            pass
+        
+        return 0

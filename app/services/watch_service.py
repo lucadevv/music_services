@@ -2,35 +2,22 @@
 from typing import Optional, Dict, Any
 from ytmusicapi import YTMusic
 import asyncio
-import json
+
+from app.services.base_service import BaseService
 from app.core.cache import cache_result
 
 
-class WatchService:
+class WatchService(BaseService):
     """Service for watch playlists."""
     
     def __init__(self, ytmusic: YTMusic):
-        self.ytmusic = ytmusic
-    
-    def _handle_ytmusic_error(self, error: Exception, operation: str) -> Exception:
-        """Handle ytmusicapi errors and provide better error messages."""
-        error_msg = str(error)
+        """
+        Initialize the watch service.
         
-        if "Expecting value" in error_msg or "JSON" in error_msg or "line 1 column 1" in error_msg:
-            return Exception(
-                f"Error de autenticación o respuesta inválida de YouTube Music. "
-                f"Verifica que browser.json sea válido y no esté expirado. "
-                f"Operación: {operation}. "
-                f"Error original: {error_msg}"
-            )
-        
-        if "rate" in error_msg.lower() or "429" in error_msg:
-            return Exception(
-                f"Rate limit de YouTube Music. Intenta más tarde. "
-                f"Operación: {operation}"
-            )
-        
-        return Exception(f"Error en {operation}: {error_msg}")
+        Args:
+            ytmusic: YTMusic client instance.
+        """
+        super().__init__(ytmusic)
     
     @cache_result(ttl=600)
     async def get_watch_playlist(
@@ -41,7 +28,27 @@ class WatchService:
         radio: bool = False,
         shuffle: bool = False
     ) -> Dict[str, Any]:
-        """Get watch playlist (next songs when playing)."""
+        """
+        Get watch playlist (next songs when playing).
+        
+        Args:
+            video_id: Video ID to start from.
+            playlist_id: Playlist ID.
+            limit: Maximum number of tracks.
+            radio: Generate radio playlist.
+            shuffle: Shuffle the playlist.
+        
+        Returns:
+            Watch playlist dictionary.
+        """
+        self._log_operation(
+            "get_watch_playlist", 
+            video_id=video_id, 
+            playlist_id=playlist_id,
+            radio=radio,
+            shuffle=shuffle
+        )
+        
         try:
             result = await asyncio.to_thread(
                 self.ytmusic.get_watch_playlist,
@@ -51,6 +58,15 @@ class WatchService:
                 radio=radio,
                 shuffle=shuffle
             )
+            
+            tracks = result.get('tracks', []) if result else []
+            self.logger.info(
+                f"Retrieved watch playlist: {len(tracks)} tracks "
+                f"(video_id={video_id}, playlist_id={playlist_id})"
+            )
             return result if result is not None else {}
         except Exception as e:
-            raise self._handle_ytmusic_error(e, f"obtener watch playlist (video_id: {video_id}, playlist_id: {playlist_id})")
+            raise self._handle_ytmusic_error(
+                e, 
+                f"obtener watch playlist (video_id: {video_id}, playlist_id: {playlist_id})"
+            )

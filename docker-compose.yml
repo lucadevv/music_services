@@ -1,10 +1,23 @@
+# Docker Compose - Music Services (FastAPI + YTMusic)
+# ===================================================
+# Este archivo es para desarrollo individual del servicio.
+# Para levantar todo el monorepo, usar el docker-compose.yml de la raíz.
+#
+# Uso:
+#   docker-compose up -d              # Levantar API + Redis
+#   docker-compose up -d ytmusic_redis  # Solo Redis
+#   docker-compose --profile dev up   # Con hot reload
+
 services:
-  api:
+  # FastAPI - Servicio de YouTube Music
+  # IMPORTANTE: El nombre del servicio debe ser "music_services" para que
+  # NestJS pueda resolverlo usando http://music_services:8000
+  music_services:
     build:
       context: .
       dockerfile: Dockerfile
       target: production
-    container_name: music_app_api
+    container_name: music_app_fastapi
     restart: unless-stopped
     ports:
       - "${PORT:-8000}:8000"
@@ -49,12 +62,57 @@ services:
           cpus: '0.5'
           memory: 256M
 
+  # Perfil de desarrollo con hot reload
+  music_services_dev:
+    profiles:
+      - dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production  # Usamos el mismo, pero con volume mount
+    container_name: music_app_fastapi_dev
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - BROWSER_JSON_PATH=/app/browser.json
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-false}
+      - CACHE_ENABLED=${CACHE_ENABLED:-true}
+      - CACHE_BACKEND=${CACHE_BACKEND:-redis}
+      - CACHE_TTL=${CACHE_TTL:-300}
+      - REDIS_HOST=ytmusic_redis
+      - REDIS_PORT=6379
+      - REDIS_DB=${REDIS_DB:-0}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - ENABLE_COMPRESSION=${ENABLE_COMPRESSION:-true}
+      - HTTP_TIMEOUT=${HTTP_TIMEOUT:-30}
+      - MAX_WORKERS=${MAX_WORKERS:-1}
+    volumes:
+      - ./:/app
+      - /app/__pycache__
+    depends_on:
+      ytmusic_redis:
+        condition: service_healthy
+    networks:
+      - music_app_network
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Redis dedicado para YTMusic cache
   ytmusic_redis:
     image: redis:7-alpine
     container_name: ytmusic_redis
     restart: unless-stopped
     ports:
-      - "6380:6379"  # Puerto diferente para evitar conflictos
+      - "${REDIS_EXTERNAL_PORT:-6380}:6379"
     command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
     volumes:
       - ytmusic_redis_data:/data
@@ -78,6 +136,7 @@ services:
 networks:
   music_app_network:
     driver: bridge
+    name: music_app_network
 
 volumes:
   ytmusic_redis_data:

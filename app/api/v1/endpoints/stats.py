@@ -74,30 +74,3 @@ async def get_stats() -> Dict[str, Any]:
             "max_workers": settings.MAX_WORKERS
         }
     }
-
-
-@router.get(
-    "/health",
-    summary="Health check",
-    description="Verifica el estado de salud del servicio.",
-    response_description="Estado del servicio",
-    responses={
-        200: {
-            "description": "Servicio saludable",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "status": "healthy",
-                        "service": "YouTube Music Service"
-                    }
-                }
-            }
-        }
-    }
-)
-async def health_check() -> Dict[str, Any]:
-    """Verifica el estado de salud del servicio."""
-    return {
-        "status": "healthy",
-        "service": settings.PROJECT_NAME
-    }

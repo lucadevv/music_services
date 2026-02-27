@@ -64,11 +64,20 @@ async def explore_music(
     
     Cada categoría en `moods_genres` tiene un campo `params` que puedes usar en `/explore/moods/{params}`.
     """
+    import logging
+    logger = logging.getLogger("explore")
+    
     try:
         # Get home with moods
         home_data = await service.get_home_with_moods()
-        
-        # Get charts
+    except Exception as e:
+        logger.warning(f"Failed to get home with moods: {e}")
+        home_data = {"home": [], "moods": []}
+    
+    # Get charts - tolerante a fallos para no bloquear toda la respuesta
+    top_songs_data = []
+    trending_data = []
+    try:
         charts = await service.get_charts()
         
         # Adapt charts response
@@ -96,21 +105,31 @@ async def explore_music(
                     trending_data, 
                     include_stream_urls=True
                 )
-        
-        return {
-            "moods_genres": home_data.get("moods", []),
-            "home": home_data.get("home", []),
-            "charts": {
-                "top_songs": top_songs_data,
-                "trending": trending_data
-            },
-            "info": {
-                "usage": "Cada categoría en 'moods_genres' tiene un campo 'params'. Usa ese 'params' en /explore/moods/{params} para obtener las playlists de esa categoría.",
-                "charts_usage": "Las canciones en 'charts' incluyen 'stream_url' y 'thumbnail' (mejor calidad) si include_stream_urls=true."
-            }
-        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.warning(f"Failed to get charts (non-critical): {e}")
+        # Charts vacíos pero el endpoint sigue funcionando
+    
+    # Si no hay moods ni home ni charts, entonces sí es un error real
+    moods_genres = home_data.get("moods", [])
+    home = home_data.get("home", [])
+    if not moods_genres and not home and not top_songs_data:
+        raise HTTPException(
+            status_code=500, 
+            detail="No se pudo obtener contenido de exploración. YouTube Music no responde."
+        )
+    
+    return {
+        "moods_genres": moods_genres,
+        "home": home,
+        "charts": {
+            "top_songs": top_songs_data,
+            "trending": trending_data
+        },
+        "info": {
+            "usage": "Cada categoría en 'moods_genres' tiene un campo 'params'. Usa ese 'params' en /explore/moods/{params} para obtener las playlists de esa categoría.",
+            "charts_usage": "Las canciones en 'charts' incluyen 'stream_url' y 'thumbnail' (mejor calidad) si include_stream_urls=true."
+        }
+    }
 
 
 @router.get(

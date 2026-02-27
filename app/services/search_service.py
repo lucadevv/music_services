@@ -1,38 +1,23 @@
 """Service for searching YouTube Music content."""
 from typing import Optional, List, Dict, Any
 from ytmusicapi import YTMusic
-from ytmusicapi.exceptions import YTMusicServerError
 import asyncio
-import json
+
+from app.services.base_service import BaseService
 from app.core.cache import cache_result
 
 
-class SearchService:
+class SearchService(BaseService):
     """Service for searching music content."""
     
     def __init__(self, ytmusic: YTMusic):
-        self.ytmusic = ytmusic
-    
-    def _handle_ytmusic_error(self, error: Exception, operation: str):
-        """Handle ytmusicapi errors and provide better error messages."""
-        error_msg = str(error)
-        error_type = type(error).__name__
+        """
+        Initialize the search service.
         
-        if "Expecting value" in error_msg or "JSON" in error_msg or "line 1 column 1" in error_msg or "JSONDecodeError" in error_type:
-            raise Exception(
-                f"Error de autenticación o respuesta inválida de YouTube Music. "
-                f"Verifica que browser.json sea válido y no esté expirado. "
-                f"Operación: {operation}. "
-                f"Error original: {error_msg}"
-            )
-        
-        if "rate" in error_msg.lower() or "429" in error_msg:
-            raise Exception(
-                f"Rate limit de YouTube Music. Intenta más tarde. "
-                f"Operación: {operation}"
-            )
-        
-        raise Exception(f"Error en {operation}: {error_msg}")
+        Args:
+            ytmusic: YTMusic client instance.
+        """
+        super().__init__(ytmusic)
     
     @cache_result(ttl=1800)
     async def search(
@@ -43,7 +28,21 @@ class SearchService:
         limit: int = 20,
         ignore_spelling: bool = False
     ) -> List[Dict[str, Any]]:
-        """Search for content."""
+        """
+        Search for content on YouTube Music.
+        
+        Args:
+            query: Search query string.
+            filter: Filter type (songs, videos, albums, artists, playlists).
+            scope: Search scope.
+            limit: Maximum number of results.
+            ignore_spelling: Whether to ignore spelling suggestions.
+        
+        Returns:
+            List of search results.
+        """
+        self._log_operation("search", query=query, filter=filter, limit=limit)
+        
         try:
             result = await asyncio.to_thread(
                 self.ytmusic.search,
@@ -60,52 +59,48 @@ class SearchService:
             if not isinstance(result, list):
                 raise Exception(f"Respuesta inesperada de ytmusicapi.search: {type(result)}")
             
+            self.logger.info(f"Search completed for '{query}': {len(result)} results")
             return result
-        except json.JSONDecodeError as e:
-            error_msg = str(e)
-            raise Exception(
-                f"Error de autenticación o respuesta inválida de YouTube Music. "
-                f"Verifica que browser.json sea válido y no esté expirado. "
-                f"Operación: búsqueda '{query}'. "
-                f"Error JSON: {error_msg}"
-            )
-        except ValueError as e:
-            error_msg = str(e)
-            if "Expecting value" in error_msg or "line 1 column 1" in error_msg:
-                raise Exception(
-                    f"Error de autenticación o respuesta inválida de YouTube Music. "
-                    f"Verifica que browser.json sea válido y no esté expirado. "
-                    f"Operación: búsqueda '{query}'. "
-                    f"Error: {error_msg}"
-                )
-            raise self._handle_ytmusic_error(e, f"búsqueda '{query}'")
-        except YTMusicServerError as e:
-            raise self._handle_ytmusic_error(e, f"búsqueda '{query}'")
-        except Exception as e:
-            error_msg = str(e)
-            error_type = type(e).__name__
             
-            if "Expecting value" in error_msg or "line 1 column 1" in error_msg or "JSONDecodeError" in error_type:
-                raise Exception(
-                    f"Error de autenticación o respuesta inválida de YouTube Music. "
-                    f"Verifica que browser.json sea válido y no esté expirado. "
-                    f"Operación: búsqueda '{query}'. "
-                    f"Error: {error_msg}"
-                )
+        except Exception as e:
             raise self._handle_ytmusic_error(e, f"búsqueda '{query}'")
     
     @cache_result(ttl=3600)
     async def get_search_suggestions(self, query: str) -> List[str]:
-        """Get search suggestions."""
+        """
+        Get search suggestions for a partial query.
+        
+        Args:
+            query: Partial search query.
+        
+        Returns:
+            List of suggestion strings.
+        """
+        self._log_operation("get_search_suggestions", query=query)
+        
         try:
             result = await asyncio.to_thread(self.ytmusic.get_search_suggestions, query)
-            return result if result is not None else []
+            suggestions = result if result is not None else []
+            self.logger.debug(f"Got {len(suggestions)} suggestions for '{query}'")
+            return suggestions
         except Exception as e:
             raise self._handle_ytmusic_error(e, f"sugerencias para '{query}'")
     
     async def remove_search_suggestions(self, query: str) -> bool:
-        """Remove search suggestions."""
+        """
+        Remove a search suggestion from history.
+        
+        Args:
+            query: Query to remove.
+        
+        Returns:
+            True if successful.
+        """
+        self._log_operation("remove_search_suggestions", query=query)
+        
         try:
-            return await asyncio.to_thread(self.ytmusic.remove_search_suggestions, query)
+            result = await asyncio.to_thread(self.ytmusic.remove_search_suggestions, query)
+            self.logger.info(f"Removed search suggestion for '{query}'")
+            return result
         except Exception as e:
             raise self._handle_ytmusic_error(e, f"eliminar sugerencia '{query}'")

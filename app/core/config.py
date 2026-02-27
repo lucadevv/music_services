@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     
     BROWSER_JSON_PATH: str = "browser.json"
+    OAUTH_JSON_PATH: str = "oauth.json"
+    YTMUSIC_CLIENT_ID: Optional[str] = None
+    YTMUSIC_CLIENT_SECRET: Optional[str] = None
     
     CORS_ORIGINS: str = "*"
     CORS_ALLOW_CREDENTIALS: bool = True
