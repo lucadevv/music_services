@@ -309,6 +309,11 @@ class StreamService(BaseService):
             elif isinstance(first_thumb, str):
                 return first_thumb
         
+        # Fallback: Generate thumbnail from YouTube video ID
+        video_id = item.get('videoId') or item.get('video_id')
+        if video_id:
+            return f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg"
+        
         return None
     
     async def _enrich_item_with_stream(

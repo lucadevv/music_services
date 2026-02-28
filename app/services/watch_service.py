@@ -52,8 +52,8 @@ class WatchService(BaseService):
         try:
             result = await asyncio.to_thread(
                 self.ytmusic.get_watch_playlist,
-                video_id=video_id,
-                playlist_id=playlist_id,
+                videoId=video_id,
+                playlistId=playlist_id,
                 limit=limit,
                 radio=radio,
                 shuffle=shuffle
