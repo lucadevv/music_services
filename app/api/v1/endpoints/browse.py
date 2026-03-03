@@ -251,3 +251,21 @@ async def get_lyrics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get(
+    "/lyrics-by-video/{video_id}",
+    summary="Get song lyrics by video ID",
+    description="Obtiene las letras de una canción usando su video ID.",
+    response_description="Letras de la canción",
+    responses={200: {"description": "Letras obtenidas exitosamente"}, 500: {"description": "Error interno"}}
+)
+async def get_lyrics_by_video(
+    video_id: str = Path(..., description="Video ID de YouTube", examples={"example1": {"value": "dQw4w9WgXcQ"}}),
+    service: BrowseService = Depends(get_browse_service)
+) -> Dict[str, Any]:
+    """Obtiene las letras de una canción por su video ID."""
+    try:
+        return await service.get_lyrics_by_video_id(video_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+

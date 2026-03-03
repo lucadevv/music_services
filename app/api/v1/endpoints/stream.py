@@ -69,7 +69,8 @@ async def get_batch_stream_urls(
                 "artist": stream_data.get("artist"),
                 "duration": stream_data.get("duration"),
                 "thumbnail": stream_data.get("thumbnail"),
-                "url": stream_data.get("url"),
+                "streamUrl": stream_data.get("streamUrl"),
+                "stream_url": stream_data.get("stream_url"),
                 "cached": from_cache
             })
             if from_cache:
@@ -79,7 +80,8 @@ async def get_batch_stream_urls(
             results.append({
                 "videoId": video_id,
                 "error": str(e),
-                "url": None,
+                "streamUrl": None,
+                "stream_url": None,
                 "cached": False
             })
     

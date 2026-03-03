@@ -191,6 +191,43 @@ class BrowseService(BaseService):
             raise self._handle_ytmusic_error(e, f"obtener canciones relacionadas de {video_id}")
     
     @cache_result(ttl=86400)
+    async def get_lyrics_by_video_id(self, video_id: str) -> Dict[str, Any]:
+        """
+        Get song lyrics by video ID.
+        
+        Args:
+            video_id: YouTube video ID.
+        
+        Returns:
+            Lyrics dictionary.
+        """
+        self._log_operation("get_lyrics_by_video_id", video_id=video_id)
+        
+        try:
+            # First get the watch playlist to find the lyrics browse ID
+            watch_playlist = await asyncio.to_thread(self.ytmusic.get_watch_playlist, video_id)
+            
+            # Check if watch playlist has lyrics
+            if not watch_playlist:
+                self.logger.info(f"No watch playlist for video: {video_id}")
+                return {"lyrics": None, "source": None, "error": "No lyrics available"}
+            
+            # Get the lyrics browse ID from the watch playlist
+            lyrics_browse_id = watch_playlist.get('lyrics')
+            if not lyrics_browse_id:
+                self.logger.info(f"No lyrics browse ID for video: {video_id}")
+                return {"lyrics": None, "source": None, "error": "No lyrics available"}
+            
+            # Now get the actual lyrics
+            result = await asyncio.to_thread(self.ytmusic.get_lyrics, lyrics_browse_id)
+            lyrics = result if result is not None else {}
+            self.logger.info(f"Retrieved lyrics for video: {video_id}")
+            return lyrics
+        except Exception as e:
+            self.logger.warning(f"Could not get lyrics for {video_id}: {e}")
+            return {"lyrics": None, "source": None, "error": str(e)}
+    
+    @cache_result(ttl=86400)
     async def get_lyrics(self, browse_id: str) -> Dict[str, Any]:
         """
         Get song lyrics.

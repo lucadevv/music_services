@@ -1,5 +1,7 @@
 """Service for streaming audio with Redis caching."""
 import time
+import random
+import re
 from typing import Optional, Dict, Any, List
 import asyncio
 import yt_dlp
@@ -26,7 +28,11 @@ class StreamService(BaseService):
     
     # TTL para diferentes tipos de datos
     METADATA_TTL = 86400  # 24 horas - metadatos no cambian
-    STREAM_URL_TTL = 7200  # 2 horas - URLs expiran (reducido de 4h para evitar 403)
+    STREAM_URL_TTL = 14400  # 4 horas - URLs de stream duran más (aumentado de 2h)
+    
+    # Retry config
+    MAX_RETRIES = 3
+    BASE_DELAY = 2  # segundos
     
     def __init__(self):
         """Initialize the stream service."""
@@ -165,74 +171,112 @@ class StreamService(BaseService):
             cached_metadata = await self._get_cached_metadata(video_id)
             cached_stream_url = await self._get_cached_stream_url(video_id)
             
+            self.logger.info(f"🔍 Cache check for {video_id}: metadata={cached_metadata is not None}, url={cached_stream_url is not None}")
+            
             if cached_metadata and cached_stream_url:
                 self.logger.info(f"🎯 Fully cached response for: {video_id}")
-                return {**cached_metadata, "url": cached_stream_url, "from_cache": True}
+                return {**cached_metadata, "streamUrl": cached_stream_url, "stream_url": cached_stream_url, "from_cache": True}
             elif cached_stream_url:
                 # Stream URL cached but no metadata (shouldn't happen, but handle it)
                 self.logger.info(f"⚡ Stream URL cached for: {video_id}")
-                return {"url": cached_stream_url, "from_cache": True}
+                return {"streamUrl": cached_stream_url, "stream_url": cached_stream_url, "from_cache": True}
         
         self.logger.info(f"🔄 Fetching fresh stream URL for: {video_id} (bypass_cache={bypass_cache})")
         
         try:
             video_url = f"https://www.youtube.com/watch?v={video_id}"
             
-            # Configuración de yt-dlp optimizada
+            # Configuración de yt-dlp para OBTENER MEJOR AUDIO
+            # Primero intentar bestaudio, luego fallback a best
             ydl_opts = {
                 'quiet': True,
                 'no_warnings': True,
+                # Intentar mejor audio, luego mejor calidad disponible
+                'format_sort': ['codec', 'br', 'size'],
                 'format': 'bestaudio/best',
                 'nocheckcertificate': True,
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['android'],
+                        # Android tiene mejores streams de audio
+                        'player_client': ['android', 'web', 'default'],
                     }
                 },
                 'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.43 Mobile Safari/537.36',
+                    'User-Agent': 'com.google.android.youtube/19.02.39 (Linux; U; Android 13; en_US) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     'Accept-Language': 'en-US,en;q=0.5',
                 },
-                'socket_timeout': 30,
+                'socket_timeout': 60,
                 'retries': 3,
+                'check_runtime': False,
+                'no_color': True,
+                # No limitar a formatos específicos para obtener todos los formats
+                'allow_unplayable_formats': True,
             }
             
-            def extract_info():
+            def extract_info_with_retry(attempt: int = 0) -> Dict[str, Any]:
+                """Extract info with retry logic."""
                 try:
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         return ydl.extract_info(video_url, download=False)
                 except Exception as e:
+                    error_str = str(e).lower()
+                    
+                    # Errores recuperables que merecen retry
+                    recoverable = any(keyword in error_str for keyword in [
+                        'timeout', 'connection', 'network', 'temporary failure',
+                        'unable to extract', 'rate', '429'
+                    ])
+                    
+                    if recoverable and attempt < self.MAX_RETRIES:
+                        delay = self.BASE_DELAY * (2 ** attempt) + random.uniform(0, 1)
+                        self.logger.warning(f"Retry {attempt + 1}/{self.MAX_RETRIES} for {video_id} after {delay:.1f}s: {str(e)}")
+                        time.sleep(delay)
+                        return extract_info_with_retry(attempt + 1)
+                    
                     self.logger.error(f"yt-dlp extraction error: {str(e)}")
                     raise
             
-            info = await asyncio.to_thread(extract_info)
+            info = await asyncio.to_thread(extract_info_with_retry)
             
             # Buscar formato de audio
             audio_url = None
             
-            # Primero buscar en formats
+            self.logger.info(f"📋 Available formats keys: {list(info.keys())}")
+            
+            # Helper function to check if format is audio-only
+            def is_audio_only(f):
+                acodec = f.get('acodec')
+                vcodec = f.get('vcodec')
+                # Audio-only if: has audio codec AND no video codec
+                has_audio = acodec is not None and acodec != 'none' and acodec != ''
+                has_video = vcodec is not None and vcodec != 'none' and vcodec != ''
+                return has_audio and not has_video
+            
+            # Buscar formatos de audio
             formats = info.get('formats') or []
+            
+            audio_url = None
             for f in formats:
-                if f.get('acodec') != 'none' and f.get('vcodec') == 'none':
+                if is_audio_only(f):
                     audio_url = f['url']
-                    self.logger.debug(f"Found audio in formats: {f.get('format_note', 'unknown')}")
+                    self.logger.info(f"✅ Found audio: itag={f.get('format_id')}, ext={f.get('ext')}")
                     break
             
             # Si no hay en formats, buscar en adaptive formats
             if not audio_url:
                 adaptive_formats = info.get('adaptive_formats') or []
                 for f in adaptive_formats:
-                    if f.get('acodec') != 'none' and f.get('vcodec') == 'none':
+                    if is_audio_only(f):
                         audio_url = f['url']
-                        self.logger.debug(f"Found audio in adaptive format: {f.get('format_note', 'unknown')}")
+                        self.logger.info(f"✅ Found audio in adaptive: itag={f.get('format_id')}, ext={f.get('ext')}")
                         break
             
-            # Último recurso
+            # Último recurso - usar URL directa si ninguna otra funciónó
             if not audio_url:
                 if info.get('url'):
                     audio_url = info['url']
-                    self.logger.debug("Using direct URL from info")
+                    self.logger.warning(f"⚠️ No audio-only format found, using direct URL")
             
             if not audio_url:
                 self.logger.warning(f"yt-dlp could not get stream for: {video_id}")
@@ -255,8 +299,8 @@ class StreamService(BaseService):
             await self._cache_metadata(video_id, metadata)
             await self._cache_stream_url(video_id, audio_url)
             
-            self.logger.info(f"✅ Retrieved fresh stream URL for: {video_id}")
-            return {**metadata, "url": audio_url, "from_cache": False}
+            self.logger.info(f"✅ Retrieved stream URL for: {video_id}")
+            return {**metadata, "streamUrl": audio_url, "stream_url": audio_url, "from_cache": False}
         
         except (CircuitBreakerError, RateLimitError, ExternalServiceError, ValidationError):
             raise
@@ -289,6 +333,8 @@ class StreamService(BaseService):
     def _get_best_thumbnail(self, item: Dict[str, Any]) -> Optional[str]:
         """Extract the best quality thumbnail from an item."""
         thumbnails = item.get('thumbnails', [])
+        
+        # Get the largest thumbnail from the list
         if thumbnails and isinstance(thumbnails, list):
             sorted_thumbs = sorted(
                 thumbnails,
@@ -296,25 +342,56 @@ class StreamService(BaseService):
                 reverse=True
             )
             if sorted_thumbs and sorted_thumbs[0].get('url'):
-                return sorted_thumbs[0]['url']
+                url = sorted_thumbs[0]['url']
+                # Try to get higher quality by modifying the URL
+                return self._enhance_thumbnail_url(url)
         
+        # Check direct thumbnail field
         thumbnail = item.get('thumbnail')
         if thumbnail and isinstance(thumbnail, str):
-            return thumbnail
+            return self._enhance_thumbnail_url(thumbnail)
         
+        # Fallback to first thumbnail if available
         if thumbnails and isinstance(thumbnails, list) and len(thumbnails) > 0:
             first_thumb = thumbnails[0]
             if isinstance(first_thumb, dict) and first_thumb.get('url'):
-                return first_thumb['url']
+                return self._enhance_thumbnail_url(first_thumb['url'])
             elif isinstance(first_thumb, str):
-                return first_thumb
+                return self._enhance_thumbnail_url(first_thumb)
         
         # Fallback: Generate thumbnail from YouTube video ID
         video_id = item.get('videoId') or item.get('video_id')
         if video_id:
-            return f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg"
+            return f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
         
         return None
+    
+    def _enhance_thumbnail_url(self, url: str) -> str:
+        """Enhance thumbnail URL to get higher quality image."""
+        if not url:
+            return url
+        
+        # For Googleusercontent URLs (most common from ytmusicapi)
+        if 'googleusercontent.com' in url:
+            # Try to increase the size parameter (wXXX-hXXX)
+            # Common sizes: 60, 120, 226, 400, 544, 800, 1200
+            # Replace wXXX-hXXX with w800-h800 or higher
+            enhanced = re.sub(r'=w\d+-h\d+', '=w800-h800', url)
+            self.logger.debug(f"Enhanced Google thumbnail: {url} -> {enhanced}")
+            return enhanced
+        
+        # For i.ytimg.com URLs (YouTube video thumbnails)
+        if 'i.ytimg.com' in url:
+            # Use maxresdefault for highest quality
+            if 'maxresdefault' not in url and 'hqdefault' not in url and 'mqdefault' not in url:
+                # Extract video ID and return maxresdefault URL
+                video_id_match = re.search(r'/vi/([^/]+)/', url)
+                if video_id_match:
+                    high_quality_url = f"https://i.ytimg.com/vi/{video_id_match.group(1)}/maxresdefault.jpg"
+                    self.logger.debug(f"Enhanced YouTube thumbnail: {url} -> {high_quality_url}")
+                    return high_quality_url
+        
+        return url
     
     async def _enrich_item_with_stream(
         self, 
@@ -331,8 +408,11 @@ class StreamService(BaseService):
         if video_id:
             try:
                 stream_data = await self.get_stream_url(video_id)
-                if stream_data.get('url'):
-                    enriched['stream_url'] = stream_data['url']
+                # Fix: buscar streamUrl (camelCase) que es lo que devuelve get_stream_url
+                if stream_data.get('streamUrl'):
+                    enriched['stream_url'] = stream_data['streamUrl']
+                elif stream_data.get('stream_url'):
+                    enriched['stream_url'] = stream_data['stream_url']
                 if stream_data.get('thumbnail'):
                     enriched['thumbnail'] = stream_data['thumbnail']
             except Exception:
@@ -372,10 +452,11 @@ class StreamService(BaseService):
         stream_tasks = [self._safe_get_stream_url(vid) for vid in video_ids]
         stream_results = await asyncio.gather(*stream_tasks, return_exceptions=True)
         
+        # Fix: buscar streamUrl (camelCase) o stream_url (snake_case)
         video_id_to_stream = {
-            video_ids[i]: result['url']
+            video_ids[i]: result.get('streamUrl') or result.get('stream_url')
             for i, result in enumerate(stream_results)
-            if isinstance(result, dict) and result.get('url')
+            if isinstance(result, dict) and (result.get('streamUrl') or result.get('stream_url'))
         }
         
         enriched_items = []
