@@ -175,11 +175,11 @@ class StreamService(BaseService):
             
             if cached_metadata and cached_stream_url:
                 self.logger.info(f"🎯 Fully cached response for: {video_id}")
-                return {**cached_metadata, "streamUrl": cached_stream_url, "stream_url": cached_stream_url, "from_cache": True}
+                return {**cached_metadata, "url": cached_stream_url, "streamUrl": cached_stream_url, "stream_url": cached_stream_url, "from_cache": True}
             elif cached_stream_url:
                 # Stream URL cached but no metadata (shouldn't happen, but handle it)
                 self.logger.info(f"⚡ Stream URL cached for: {video_id}")
-                return {"streamUrl": cached_stream_url, "stream_url": cached_stream_url, "from_cache": True}
+                return {"url": cached_stream_url, "streamUrl": cached_stream_url, "stream_url": cached_stream_url, "from_cache": True}
         
         self.logger.info(f"🔄 Fetching fresh stream URL for: {video_id} (bypass_cache={bypass_cache})")
         
@@ -287,12 +287,16 @@ class StreamService(BaseService):
             
             youtube_stream_circuit.record_success()
             
+            # thumbnail de máxima calidad: siempre usar maxresdefault.jpg
+            # Esto es para el player - calidad máxima (1280x720)
+            high_res_thumbnail = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+            
             # Extraer metadatos
             metadata = {
                 "title": info.get('title'),
                 "artist": info.get('artist', info.get('uploader', 'Unknown Artist')),
                 "duration": info.get('duration'),
-                "thumbnail": info.get('thumbnail')
+                "thumbnail": high_res_thumbnail  # Siempre maxresdefault para mejor calidad
             }
             
             # Cache both metadata and stream URL
@@ -300,7 +304,7 @@ class StreamService(BaseService):
             await self._cache_stream_url(video_id, audio_url)
             
             self.logger.info(f"✅ Retrieved stream URL for: {video_id}")
-            return {**metadata, "streamUrl": audio_url, "stream_url": audio_url, "from_cache": False}
+            return {**metadata, "url": audio_url, "streamUrl": audio_url, "stream_url": audio_url, "from_cache": False}
         
         except (CircuitBreakerError, RateLimitError, ExternalServiceError, ValidationError):
             raise
