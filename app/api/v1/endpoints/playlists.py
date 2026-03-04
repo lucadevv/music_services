@@ -51,7 +51,8 @@ def get_stream_service() -> StreamService:
 )
 async def get_playlist(
     playlist_id: str = Path(..., description="ID de la playlist (acepta browseId con prefijo VL)", examples={"example1": {"value": "PL..."}}),
-    limit: int = Query(100, ge=1, le=5000, description="Número máximo de canciones", examples=[100]),
+    limit: int = Query(100, ge=1, le=5000, description="Número máximo de canciones"),
+    start_index: int = Query(0, ge=0, description="Índice inicial para paginación"),
     related: bool = Query(False, description="Incluir canciones relacionadas"),
     suggestions_limit: int = Query(0, ge=0, le=50, description="Límite de sugerencias"),
     include_stream_urls: bool = Query(
@@ -60,7 +61,7 @@ async def get_playlist(
     ),
     prefetch_count: int = Query(
         10, 
-        ge=0, 
+        ge=-1, 
         le=50,
         description="Número de URLs a obtener en paralelo (0 = none, -1 = todas)"
     ),
@@ -68,17 +69,24 @@ async def get_playlist(
     stream_service: StreamService = Depends(get_stream_service)
 ) -> Dict[str, Any]:
     """
-    Obtiene información completa de una playlist pública.
+    Obtiene información completa de una playlist pública con paginación.
     
     - Acepta `playlistId` o `browseId` (con prefijo VL, se normaliza automáticamente)
-    - Retorna todas las canciones de la playlist
-    - `prefetch_count`: Cuántos tracks enriquecer con stream URLs (default: 10)
+    - `start_index`: Índice inicial para paginación (0 = desde el inicio)
+    - `limit`: Número máximo de canciones a retornar
+    - `prefetch_count`: Cuántos tracks enriquecer con stream URLs (default: 10, -1 = todos)
     
     Si `include_stream_urls=true` y `prefetch_count > 0`, los primeros N tracks incluyen:
     - `stream_url`: URL directa de audio (mejor calidad)
     """
     try:
-        playlist_data = await service.get_playlist(playlist_id, limit, related, suggestions_limit)
+        playlist_data = await service.get_playlist(
+            playlist_id, 
+            limit, 
+            related, 
+            suggestions_limit,
+            start_index
+        )
         
         # Enrich tracks with stream URLs - solo los primeros N para evitar latencia
         if include_stream_urls and prefetch_count != 0 and playlist_data.get('tracks'):

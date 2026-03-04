@@ -37,10 +37,11 @@ class SearchService(BaseService):
         filter: Optional[str] = None,
         scope: Optional[str] = None,
         limit: int = 20,
-        ignore_spelling: bool = False
+        ignore_spelling: bool = False,
+        start_index: int = 0
     ) -> List[Dict[str, Any]]:
         """
-        Search for content on YouTube Music.
+        Search for content on YouTube Music with pagination.
         
         Args:
             query: Search query string.
@@ -48,11 +49,12 @@ class SearchService(BaseService):
             scope: Search scope.
             limit: Maximum number of results.
             ignore_spelling: Whether to ignore spelling suggestions.
+            start_index: Starting index for pagination (0-based).
         
         Returns:
-            List of search results.
+            List of search results with pagination metadata.
         """
-        self._log_operation("search", query=query, filter=filter, limit=limit)
+        self._log_operation("search", query=query, filter=filter, limit=limit, start_index=start_index)
         
         # Check circuit breaker before making request
         self._check_circuit_breaker()
@@ -76,7 +78,11 @@ class SearchService(BaseService):
             if not isinstance(result, list):
                 raise Exception(f"Respuesta inesperada de ytmusicapi.search: {type(result)}")
             
-            self.logger.info(f"Search completed for '{query}': {len(result)} results")
+            # Apply start_index pagination
+            if start_index > 0 and start_index < len(result):
+                result = result[start_index:]
+            
+            self.logger.info(f"Search completed for '{query}': {len(result)} results (start={start_index})")
             return result
             
         except CircuitBreakerError:
