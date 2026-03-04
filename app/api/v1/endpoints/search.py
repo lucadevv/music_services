@@ -94,6 +94,14 @@ async def search_music(
     # Search - exceptions handled by global handlers
     results = await service.search(q, filter, scope, limit, ignore_spelling, start_index)
     
+    # Force limit AFTER service returns - ytmusicapi may ignore limit parameter
+    if limit > 0:
+        results = results[:limit]
+    
+    # Apply start_index again after limit enforcement
+    if start_index > 0:
+        results = results[start_index:]
+    
     # Enrich songs/videos with stream URLs and thumbnails
     if include_stream_urls and filter in ['songs', 'videos', None]:
         # Filter items that have videoId

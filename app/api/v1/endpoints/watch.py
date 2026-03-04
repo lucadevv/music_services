@@ -51,6 +51,7 @@ async def get_watch_playlist(
     video_id: Optional[str] = Query(None, description="ID del video para iniciar", examples=["rMbATaj7Il8"]),
     playlist_id: Optional[str] = Query(None, description="ID de la playlist", examples=["PL..."]),
     limit: int = Query(25, ge=1, le=100, description="Número de canciones", examples=[25]),
+    start_index: int = Query(0, ge=0, description="Índice inicial para paginación"),
     radio: bool = Query(False, description="Obtener playlist de radio"),
     shuffle: bool = Query(False, description="Obtener playlist en modo shuffle"),
     include_stream_urls: bool = Query(
@@ -59,7 +60,7 @@ async def get_watch_playlist(
     ),
     prefetch_count: int = Query(
         10, 
-        ge=0, 
+        ge=-1, 
         le=50,
         description="Número de URLs a obtener en paralelo (0 = none, -1 = todas)"
     ),
@@ -99,6 +100,19 @@ async def get_watch_playlist(
         if include_stream_urls and prefetch_count != 0:
             tracks = playlist_data.get('tracks') or playlist_data.get('items') or []
             if tracks:
+                # Apply pagination after getting all tracks
+                if start_index > 0 and start_index < len(tracks):
+                    tracks = tracks[start_index:]
+                
+                if limit > 0 and limit < len(tracks):
+                    tracks = tracks[:limit]
+                
+                # Update tracks in playlist_data with pagination applied
+                if 'tracks' in playlist_data:
+                    playlist_data['tracks'] = tracks
+                elif 'items' in playlist_data:
+                    playlist_data['items'] = tracks
+                
                 # Si prefetch_count es -1, enriquecer todos; si es > 0, solo los primeros N
                 tracks_to_enrich = tracks if prefetch_count == -1 else tracks[:prefetch_count]
                 tracks_remaining = [] if prefetch_count == -1 else tracks[prefetch_count:]
@@ -123,6 +137,18 @@ async def get_watch_playlist(
                     tracks_with_url = sum(1 for t in enriched_tracks if t.get('stream_url'))
                     playlist_data['stream_urls_prefetched'] = tracks_with_url
                     playlist_data['stream_urls_total'] = len(enriched_tracks)
+        else:
+            # Apply pagination even when not enriching with stream URLs
+            tracks = playlist_data.get('tracks') or playlist_data.get('items') or []
+            if tracks:
+                if start_index > 0 and start_index < len(tracks):
+                    tracks = tracks[start_index:]
+                if limit > 0 and limit < len(tracks):
+                    tracks = tracks[:limit]
+                if 'tracks' in playlist_data:
+                    playlist_data['tracks'] = tracks
+                elif 'items' in playlist_data:
+                    playlist_data['items'] = tracks
         
         return playlist_data
     except Exception as e:

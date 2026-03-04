@@ -88,6 +88,17 @@ async def get_playlist(
             start_index
         )
         
+        # Apply limit/offset AFTER service returns - ytmusicapi may ignore limit
+        if playlist_data.get('tracks'):
+            tracks = playlist_data['tracks']
+            # Apply start_index
+            if start_index > 0 and start_index < len(tracks):
+                tracks = tracks[start_index:]
+            # Apply limit
+            if limit > 0 and limit < len(tracks):
+                tracks = tracks[:limit]
+            playlist_data['tracks'] = tracks
+        
         # Enrich tracks with stream URLs - solo los primeros N para evitar latencia
         if include_stream_urls and prefetch_count != 0 and playlist_data.get('tracks'):
             tracks = playlist_data['tracks']

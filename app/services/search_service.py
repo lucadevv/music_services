@@ -82,6 +82,10 @@ class SearchService(BaseService):
             if start_index > 0 and start_index < len(result):
                 result = result[start_index:]
             
+            # Apply limit after pagination - ytmusicapi may return more than requested
+            if limit > 0 and limit < len(result):
+                result = result[:limit]
+            
             self.logger.info(f"Search completed for '{query}': {len(result)} results (start={start_index})")
             return result
             
