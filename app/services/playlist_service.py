@@ -34,7 +34,7 @@ class PlaylistService(BaseService):
             return playlist_id[2:]
         return playlist_id
     
-    @cache_result(ttl=3600)
+    @cache_result(ttl=86400)  # 24 horas - playlists no cambian frecuentemente
     async def get_playlist(
         self, 
         playlist_id: str, 

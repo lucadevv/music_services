@@ -1,8 +1,19 @@
 """Stream endpoints."""
-from fastapi import APIRouter, Depends, Path, Query, HTTPException
-from typing import Dict, Any, List
+from fastapi import APIRouter, Depends, Path, Query, HTTPException, Header, Response
+from fastapi.responses import StreamingResponse
+from typing import Dict, Any, List, Optional
+import httpx
+import asyncio
 from app.services.stream_service import StreamService
 from app.core.validators import validate_video_id
+from app.core.cache_redis import (
+    delete_cached_key,
+    get_cached_value,
+    get_cached_timestamp,
+    has_cached_key,
+    clear_cache,
+    get_cache_stats,
+)
 from app.schemas.errors import COMMON_ERROR_RESPONSES
 
 router = APIRouter(tags=["stream"])
@@ -11,6 +22,96 @@ router = APIRouter(tags=["stream"])
 def get_stream_service() -> StreamService:
     """Dependency to get stream service."""
     return StreamService()
+
+
+# ============================================
+# PROXY STREAM ENDPOINT - Reproduce audio directamente
+# ============================================
+
+@router.get(
+    "/proxy/{video_id}",
+    summary="Proxy de streaming de audio",
+    description="Endpoint de streaming de audio que evita problemas de CORS. El backend hace proxy del audio de YouTube.",
+    responses={
+        200: {
+            "description": "Stream de audio",
+            "content": {
+                "audio/mpeg": {},
+                "audio/mp4": {},
+                "audio/*": {}
+            }
+        },
+        404: {"description": "Audio no encontrado"},
+        500: {"description": "Error al obtener stream"}
+    }
+)
+async def proxy_stream_audio(
+    video_id: str = Path(..., description="ID del video de YouTube"),
+    service: StreamService = Depends(get_stream_service)
+):
+    """
+    Endpoint de proxy de streaming.
+    
+    Este endpoint:
+    1. Obtiene la URL de stream de yt-dlp (usa cache)
+    2.Hace streaming del audio directamente al cliente
+    3. Evita problemas de CORS y URLs incompatibles
+    
+    Ejemplo de uso en Flutter:
+    ```dart
+    // Usar este endpoint en lugar de la URL directa de YouTube
+    final streamUrl = 'http://backend:8000/api/v1/stream/proxy/$videoId';
+    await player.setUrl(streamUrl);
+    ```
+    """
+    validate_video_id(video_id)
+    
+    try:
+        # 1. Obtener la URL de streaming (usa cache automáticamente)
+        stream_data = await service.get_stream_url(video_id, bypass_cache=False)
+        audio_url = stream_data.get("streamUrl") or stream_data.get("stream_url")
+        
+        if not audio_url:
+            raise HTTPException(status_code=404, detail="No se pudo obtener la URL de audio")
+        
+        # 2. Configurar el streaming con headers apropiados
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36",
+            "Accept": "*/*",
+            "Referer": "https://www.youtube.com/",
+        }
+        
+        # 3. Crear el cliente HTTP para streaming
+        async def stream_generator():
+            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
+                async with client.stream("GET", audio_url, headers=headers, follow_redirects=True) as response:
+                    if response.status_code != 200:
+                        raise HTTPException(
+                            status_code=response.status_code,
+                            detail=f"Error del servidor de audio: {response.status_code}"
+                        )
+                    
+                    # Determinar content-type
+                    content_type = response.headers.get("content-type", "audio/mpeg")
+                    
+                    # Streaming del contenido
+                    async for chunk in response.aiter_bytes(chunk_size=8192):
+                        yield chunk
+        
+        # 4. Devolver como streaming response
+        return StreamingResponse(
+            stream_generator(),
+            media_type="audio/mpeg",
+            headers={
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=14400",  # 4 horas como las URLs de YouTube
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al reproducir audio: {str(e)}")
 
 
 # ============================================
@@ -36,10 +137,13 @@ async def get_batch_stream_urls(
 ) -> Dict[str, Any]:
     """
     Obtiene URLs de stream para múltiples videos a la vez.
+    Optimizado con llamadas paralelas para mejor rendimiento.
     
     **Ejemplo:**
     `/stream/batch?ids=dQw4w9WgXcQ,9bZkp7q19f0,kJQP7kiw5Fk`
     """
+    import asyncio
+    
     # Parse video IDs from comma-separated string
     video_id_list = [vid.strip() for vid in video_ids.split(',') if vid.strip()]
     
@@ -56,14 +160,13 @@ async def get_batch_stream_urls(
     results = []
     cached_count = 0
     
-    # Obtener todas las URLs (usa cache automáticamente)
-    for video_id in video_id_list:
+    # Función helper para obtener stream de un video
+    async def get_single_stream(video_id: str) -> Dict[str, Any]:
         try:
             validate_video_id(video_id)
             stream_data = await service.get_stream_url(video_id, bypass_cache=False)
             from_cache = stream_data.get("from_cache", False)
-            
-            results.append({
+            return {
                 "videoId": video_id,
                 "title": stream_data.get("title"),
                 "artist": stream_data.get("artist"),
@@ -71,19 +174,27 @@ async def get_batch_stream_urls(
                 "thumbnail": stream_data.get("thumbnail"),
                 "streamUrl": stream_data.get("streamUrl"),
                 "stream_url": stream_data.get("stream_url"),
-                "cached": from_cache
-            })
-            if from_cache:
-                cached_count += 1
-            
+                "cached": from_cache,
+                "error": None
+            }
         except Exception as e:
-            results.append({
+            return {
                 "videoId": video_id,
                 "error": str(e),
                 "streamUrl": None,
                 "stream_url": None,
                 "cached": False
-            })
+            }
+    
+    # Ejecutar todas las llamadas en paralelo
+    stream_tasks = [get_single_stream(vid) for vid in video_id_list]
+    stream_results = await asyncio.gather(*stream_tasks)
+    
+    # Procesar resultados
+    for result in stream_results:
+        results.append(result)
+        if result.get("cached"):
+            cached_count += 1
     
     return {
         "results": results,
@@ -91,6 +202,94 @@ async def get_batch_stream_urls(
             "total": len(results),
             "cached": cached_count,
             "failed": len(results) - cached_count
+        }
+    }
+
+
+# ============================================
+# CACHE MANAGEMENT ENDPOINTS - BEFORE /{video_id}
+# ============================================
+
+@router.get(
+    "/cache/stats",
+    summary="Get cache statistics",
+    description="Muestra estadísticas del cache de Redis.",
+)
+async def get_stream_cache_stats() -> Dict[str, Any]:
+    """Muestra estadísticas del cache."""
+    return await get_cache_stats()
+
+
+@router.delete(
+    "/cache",
+    summary="Clear all stream cache",
+    description="Limpia todo el cache de streams.",
+)
+async def clear_all_stream_cache() -> Dict[str, Any]:
+    """Limpia todo el cache de streams."""
+    await clear_cache("music:stream")
+    return {"status": "cleared", "pattern": "music:stream"}
+
+
+@router.get(
+    "/cache/info/{video_id}",
+    summary="Check cached stream URL for a video",
+    description="Verifica si hay una URL de stream cached para un video y muestra info.",
+)
+async def get_stream_cache_info(
+    video_id: str = Path(..., description="ID del video"),
+) -> Dict[str, Any]:
+    """Muestra información del cache para un video."""
+    validate_video_id(video_id)
+    
+    metadata_key = f"music:stream:metadata:{video_id}"
+    stream_url_key = f"music:stream:url:{video_id}"
+    
+    metadata_exists = await has_cached_key(metadata_key)
+    url_exists = await has_cached_key(stream_url_key)
+    
+    metadata_timestamp = await get_cached_timestamp(metadata_key) if metadata_exists else 0
+    url_timestamp = await get_cached_timestamp(stream_url_key) if url_exists else 0
+    
+    metadata_cached = await get_cached_value(metadata_key) if metadata_exists else None
+    url_cached = await get_cached_value(stream_url_key) if url_exists else None
+    
+    return {
+        "videoId": video_id,
+        "cached": {
+            "metadata": metadata_exists,
+            "metadata_timestamp": metadata_timestamp,
+            "metadata_value": metadata_cached,
+            "stream_url": url_exists,
+            "url_timestamp": url_timestamp,
+            "url_value": url_cached[:200] + "..." if url_cached and len(url_cached) > 200 else url_cached
+        }
+    }
+
+
+@router.delete(
+    "/cache/{video_id}",
+    summary="Delete cached stream URL for a video",
+    description="Elimina la URL de stream cached para un video específico.",
+)
+async def delete_stream_cache(
+    video_id: str = Path(..., description="ID del video"),
+) -> Dict[str, Any]:
+    """Elimina el cache de un video específico."""
+    validate_video_id(video_id)
+    
+    # Keys used by StreamService
+    metadata_key = f"music:stream:metadata:{video_id}"
+    stream_url_key = f"music:stream:url:{video_id}"
+    
+    deleted_metadata = await delete_cached_key(metadata_key)
+    deleted_url = await delete_cached_key(stream_url_key)
+    
+    return {
+        "videoId": video_id,
+        "deleted": {
+            "metadata": deleted_metadata,
+            "stream_url": deleted_url
         }
     }
 

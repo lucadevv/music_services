@@ -19,7 +19,7 @@ class WatchService(BaseService):
         """
         super().__init__(ytmusic)
     
-    @cache_result(ttl=600)
+    @cache_result(ttl=3600)  # 1 hora - radio/watch playlists
     async def get_watch_playlist(
         self,
         video_id: Optional[str] = None,

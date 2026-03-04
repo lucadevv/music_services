@@ -117,15 +117,26 @@ class StreamService(BaseService):
         except Exception as e:
             self.logger.warning(f"Error caching metadata: {e}")
     
-    async def _cache_stream_url(self, video_id: str, stream_url: str) -> None:
-        """Cache stream URL with TTL (async)."""
+    async def _cache_stream_url(self, video_id: str, stream_url: str, ttl: Optional[int] = None) -> None:
+        """Cache stream URL with TTL (async).
+        
+        Args:
+            video_id: Video ID
+            stream_url: Stream URL to cache
+            ttl: Custom TTL in seconds. If None, uses default STREAM_URL_TTL.
+        """
         if not self.settings.CACHE_ENABLED:
             return
         
         cache_key = self._get_stream_url_cache_key(video_id)
+        effective_ttl = ttl if ttl is not None else self.STREAM_URL_TTL
+        
+        # No cache for more than 6 hours (YouTube URLs typically expire in 6-12 hours)
+        effective_ttl = min(effective_ttl, 6 * 3600)
+        
         try:
-            await set_cached_value(cache_key, stream_url, self.STREAM_URL_TTL)
-            self.logger.info(f"💾 Cached stream URL for: {video_id} (TTL: {self.STREAM_URL_TTL}s)")
+            await set_cached_value(cache_key, stream_url, effective_ttl)
+            self.logger.info(f"💾 Cached stream URL for: {video_id} (TTL: {effective_ttl}s)")
         except Exception as e:
             self.logger.warning(f"Error caching stream URL: {e}")
 
@@ -186,14 +197,16 @@ class StreamService(BaseService):
         try:
             video_url = f"https://www.youtube.com/watch?v={video_id}"
             
-            # Configuración de yt-dlp para OBTENER MEJOR AUDIO
-            # Primero intentar bestaudio, luego fallback a best
+            # Configuración de yt-dlp para OBTENER SOLO AUDIO (audio-only)
+            # Usar formato específico para audio-only sin video
             ydl_opts = {
                 'quiet': True,
                 'no_warnings': True,
-                # Intentar mejor audio, luego mejor calidad disponible
-                'format_sort': ['codec', 'br', 'size'],
-                'format': 'bestaudio/best',
+                # FORMA CORRECTA de obtener solo audio: usar formato específico
+                # 'bestaudio[ext=m4a]' = mejor audio en m4a
+                # '/bestaudio' = fallback a cualquier bestaudio
+                # '/bestaudio/best' = fallback final
+                'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
                 'nocheckcertificate': True,
                 'extractor_args': {
                     'youtube': {
@@ -242,7 +255,7 @@ class StreamService(BaseService):
             # Buscar formato de audio
             audio_url = None
             
-            self.logger.info(f"📋 Available formats keys: {list(info.keys())}")
+            self.logger.info(f"📋 Available formats: {len(info.get('formats', []))}, requested: {len(info.get('requested_formats', []))}")
             
             # Helper function to check if format is audio-only
             def is_audio_only(f):
@@ -253,17 +266,24 @@ class StreamService(BaseService):
                 has_video = vcodec is not None and vcodec != 'none' and vcodec != ''
                 return has_audio and not has_video
             
-            # Buscar formatos de audio
-            formats = info.get('formats') or []
-            
-            audio_url = None
-            for f in formats:
+            # PRIMERO: Buscar en requested_formats (mejores formatos)
+            requested_formats = info.get('requested_formats') or []
+            for f in requested_formats:
                 if is_audio_only(f):
                     audio_url = f['url']
-                    self.logger.info(f"✅ Found audio: itag={f.get('format_id')}, ext={f.get('ext')}")
+                    self.logger.info(f"✅ Found audio in requested_formats: itag={f.get('format_id')}, ext={f.get('ext')}, acodec={f.get('acodec')}")
                     break
             
-            # Si no hay en formats, buscar en adaptive formats
+            # SEGUNDO: Si no hay en requested_formats, buscar en formats
+            if not audio_url:
+                formats = info.get('formats') or []
+                for f in formats:
+                    if is_audio_only(f):
+                        audio_url = f['url']
+                        self.logger.info(f"✅ Found audio in formats: itag={f.get('format_id')}, ext={f.get('ext')}")
+                        break
+            
+            # TERCERO: Si no hay audio-only, buscar en adaptive formats
             if not audio_url:
                 adaptive_formats = info.get('adaptive_formats') or []
                 for f in adaptive_formats:
@@ -288,20 +308,33 @@ class StreamService(BaseService):
             youtube_stream_circuit.record_success()
             
             # thumbnail de máxima calidad: siempre usar maxresdefault.jpg
-            # Esto es para el player - calidad máxima (1280x720)
             high_res_thumbnail = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+            
+            # Extraer el tiempo de expiración de la URL de YouTube
+            # La URL contiene "expire=XXXXXXXX" - convertir a TTL
+            url_expire = None
+            calculated_ttl = self.STREAM_URL_TTL  # Default TTL
+            if audio_url:
+                expire_match = re.search(r'expire=(\d+)', audio_url)
+                if expire_match:
+                    url_expire = int(expire_match.group(1))
+                    current_time = int(time.time())
+                    calculated_ttl = max(0, url_expire - current_time)  # Ensure non-negative
+                    self.logger.info(f"🔗 YouTube URL expira en {calculated_ttl} segundos (expire={url_expire}, now={current_time})")
             
             # Extraer metadatos
             metadata = {
                 "title": info.get('title'),
                 "artist": info.get('artist', info.get('uploader', 'Unknown Artist')),
                 "duration": info.get('duration'),
-                "thumbnail": high_res_thumbnail  # Siempre maxresdefault para mejor calidad
+                "thumbnail": high_res_thumbnail
             }
             
             # Cache both metadata and stream URL
+            # Usar el TTL calculado de YouTube si está disponible
             await self._cache_metadata(video_id, metadata)
-            await self._cache_stream_url(video_id, audio_url)
+            cache_ttl = min(calculated_ttl, 6*3600) if url_expire else self.STREAM_URL_TTL
+            await self._cache_stream_url(video_id, audio_url, ttl=cache_ttl)
             
             self.logger.info(f"✅ Retrieved stream URL for: {video_id}")
             return {**metadata, "url": audio_url, "streamUrl": audio_url, "stream_url": audio_url, "from_cache": False}
@@ -429,12 +462,20 @@ class StreamService(BaseService):
         items: List[Dict[str, Any]], 
         include_stream_urls: bool = True
     ) -> List[Dict[str, Any]]:
-        """Enrich multiple items with stream URLs and best thumbnails in parallel."""
+        """
+        Enrich multiple items with stream URLs and best thumbnails in parallel.
+        
+        OPTIMIZADO: 
+        1. Primero verifica qué URLs ya están cacheadas (instantáneo)
+        2. Solo llama a yt-dlp para las que NO están cacheadas
+        3. делает llamadas en paralelo para máximo rendimiento
+        """
         if not items:
             return []
         
         self.logger.debug(f"Enriching {len(items)} items with streams")
         
+        # Primero, enriquecer thumbnails (siempre rápido)
         items_with_thumbnails = []
         for item in items:
             enriched = item.copy()
@@ -444,6 +485,7 @@ class StreamService(BaseService):
         if not include_stream_urls:
             return items_with_thumbnails
         
+        # Extraer video IDs
         video_ids = [
             item.get('videoId') or item.get('video_id')
             for item in items_with_thumbnails
@@ -453,30 +495,47 @@ class StreamService(BaseService):
         if not video_ids:
             return items_with_thumbnails
         
-        stream_tasks = [self._safe_get_stream_url(vid) for vid in video_ids]
-        stream_results = await asyncio.gather(*stream_tasks, return_exceptions=True)
+        # FASE 1: Verificar cuáles están cacheadas (instantáneo)
+        cached_urls = {}
+        uncached_video_ids = []
         
-        # Fix: buscar streamUrl (camelCase) o stream_url (snake_case)
-        video_id_to_stream = {
-            video_ids[i]: result.get('streamUrl') or result.get('stream_url')
-            for i, result in enumerate(stream_results)
-            if isinstance(result, dict) and (result.get('streamUrl') or result.get('stream_url'))
-        }
+        for vid in video_ids:
+            cached_url = await self._get_cached_stream_url(vid)
+            if cached_url:
+                cached_urls[vid] = cached_url
+                self.logger.debug(f"⚡ Cache HIT: {vid}")
+            else:
+                uncached_video_ids.append(vid)
         
+        self.logger.info(f"📊 Cache stats: {len(cached_urls)} cached, {len(uncached_video_ids)} need fetch")
+        
+        # FASE 2: Obtener URLs no cacheadas en paralelo
+        if uncached_video_ids:
+            self.logger.info(f"🔄 Fetching {len(uncached_video_ids)} stream URLs...")
+            
+            stream_tasks = [self._safe_get_stream_url(vid) for vid in uncached_video_ids]
+            stream_results = await asyncio.gather(*stream_tasks, return_exceptions=True)
+            
+            # Procesar resultados
+            for i, result in enumerate(stream_results):
+                vid = uncached_video_ids[i]
+                if isinstance(result, dict):
+                    url = result.get('streamUrl') or result.get('stream_url')
+                    if url:
+                        cached_urls[vid] = url
+        
+        # FASE 3: Combinar resultados
         enriched_items = []
         for item in items_with_thumbnails:
             enriched_item = item.copy()
             video_id = enriched_item.get('videoId') or enriched_item.get('video_id')
             
-            if video_id and video_id in video_id_to_stream:
-                enriched_item['stream_url'] = video_id_to_stream[video_id]
-            
-            if 'thumbnail' not in enriched_item or enriched_item['thumbnail'] is None:
-                enriched_item['thumbnail'] = self._get_best_thumbnail(item)
+            if video_id and video_id in cached_urls:
+                enriched_item['stream_url'] = cached_urls[video_id]
             
             enriched_items.append(enriched_item)
         
-        self.logger.info(f"Enriched {len(enriched_items)} items, {len(video_id_to_stream)} with stream URLs")
+        self.logger.info(f"Enriched {len(enriched_items)} items, {len(cached_urls)} with stream URLs")
         return enriched_items
     
     async def _safe_get_stream_url(self, video_id: str) -> Dict[str, Any]:

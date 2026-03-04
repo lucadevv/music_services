@@ -23,6 +23,7 @@ from app.core.exception_handlers import (
     generic_exception_handler,
 )
 from app.api.v1.router import api_router
+from app.core.background_cache import cache_manager
 
 # Setup logging first
 setup_logging()
@@ -30,10 +31,27 @@ logger = get_logger(__name__)
 
 settings = get_settings()
 
+
+def get_effective_ip(request: Request) -> str:
+    """Return the client's real IP, honoring X-Forwarded-For when behind proxies."""
+    # Try X-Forwarded-For header first (when behind proxy/load balancer)
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    # Fall back to direct client IP
+    if request.client:
+        return request.client.host
+    # Last resort: unknown
+    return "unknown"
+
+
+# Rate limiting con Redis para entornos distribuidos
+# Usa Redis como storage para que funcione con múltiples instancias
+storage_uri = f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}"
 limiter = Limiter(
-    key_func=get_remote_address,
+    key_func=get_effective_ip,
     default_limits=[f"{settings.RATE_LIMIT_PER_MINUTE}/minute"] if settings.RATE_LIMIT_ENABLED else [],
-    storage_uri="memory://"
+    storage_uri=storage_uri
 )
 
 
@@ -59,7 +77,14 @@ async def lifespan(app: FastAPI):
     logger.info(f"Rate Limiting: {'Enabled' if settings.RATE_LIMIT_ENABLED else 'Disabled'}")
     logger.info(f"Caching: {'Enabled' if settings.CACHE_ENABLED else 'Disabled'}")
     logger.info(f"Compression: {'Enabled' if settings.ENABLE_COMPRESSION else 'Disabled'}")
+    
+    # Iniciar gestor de cache en background
+    await cache_manager.start()
+    
     yield
+    
+    # Detener gestor de cache
+    await cache_manager.stop()
     logger.info(f"Shutting down {settings.PROJECT_NAME}")
 
 

@@ -4,6 +4,7 @@ from typing import Dict, Any
 from app.core.cache import get_cache_stats
 from app.core.config import get_settings
 from app.core.circuit_breaker import youtube_stream_circuit
+from app.core.background_cache import cache_manager
 
 router = APIRouter(tags=["stats"])
 settings = get_settings()
@@ -55,6 +56,7 @@ async def get_stats() -> Dict[str, Any]:
     """Obtiene estadísticas completas del servicio."""
     cache_stats = get_cache_stats()
     circuit_status = youtube_stream_circuit.get_status()
+    cache_metrics = cache_manager.get_metrics()
     
     return {
         "service": settings.PROJECT_NAME,
@@ -65,6 +67,7 @@ async def get_stats() -> Dict[str, Any]:
             "limit_per_hour": settings.RATE_LIMIT_PER_HOUR
         },
         "caching": cache_stats,
+        "cache_manager": cache_metrics,
         "circuit_breaker": {
             "youtube_stream": circuit_status
         },

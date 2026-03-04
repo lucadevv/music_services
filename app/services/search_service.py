@@ -5,6 +5,8 @@ import asyncio
 
 from app.services.base_service import BaseService
 from app.core.cache import cache_result
+from app.core.circuit_breaker import youtube_search_circuit
+from app.core.exceptions import CircuitBreakerError
 
 
 class SearchService(BaseService):
@@ -18,6 +20,15 @@ class SearchService(BaseService):
             ytmusic: YTMusic client instance.
         """
         super().__init__(ytmusic)
+    
+    def _check_circuit_breaker(self):
+        """Check if circuit breaker is open and raise error if so."""
+        if youtube_search_circuit.is_open():
+            status = youtube_search_circuit.get_status()
+            raise CircuitBreakerError(
+                f"YouTube search temporarily unavailable. Retry in {status.get('remaining_time_seconds', 60)} seconds.",
+                retry_after=status.get('remaining_time_seconds', 60)
+            )
     
     @cache_result(ttl=1800)
     async def search(
@@ -43,6 +54,9 @@ class SearchService(BaseService):
         """
         self._log_operation("search", query=query, filter=filter, limit=limit)
         
+        # Check circuit breaker before making request
+        self._check_circuit_breaker()
+        
         try:
             result = await asyncio.to_thread(
                 self.ytmusic.search,
@@ -53,6 +67,9 @@ class SearchService(BaseService):
                 ignore_spelling=ignore_spelling
             )
             
+            # Record success
+            youtube_search_circuit.record_success()
+            
             if result is None:
                 return []
             
@@ -62,7 +79,11 @@ class SearchService(BaseService):
             self.logger.info(f"Search completed for '{query}': {len(result)} results")
             return result
             
+        except CircuitBreakerError:
+            raise
         except Exception as e:
+            # Record failure
+            youtube_search_circuit.record_failure(str(e))
             raise self._handle_ytmusic_error(e, f"búsqueda '{query}'")
     
     @cache_result(ttl=3600)
@@ -78,12 +99,23 @@ class SearchService(BaseService):
         """
         self._log_operation("get_search_suggestions", query=query)
         
+        # Check circuit breaker before making request
+        self._check_circuit_breaker()
+        
         try:
             result = await asyncio.to_thread(self.ytmusic.get_search_suggestions, query)
             suggestions = result if result is not None else []
+            
+            # Record success
+            youtube_search_circuit.record_success()
+            
             self.logger.debug(f"Got {len(suggestions)} suggestions for '{query}'")
             return suggestions
+        except CircuitBreakerError:
+            raise
         except Exception as e:
+            # Record failure
+            youtube_search_circuit.record_failure(str(e))
             raise self._handle_ytmusic_error(e, f"sugerencias para '{query}'")
     
     async def remove_search_suggestions(self, query: str) -> bool:

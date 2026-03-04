@@ -36,12 +36,8 @@ async def get_redis_client() -> redis.Redis:
         )
         _redis_client = redis.Redis(connection_pool=_redis_pool)
         
-        # Test connection
-        try:
-            await _redis_client.ping()
-            logger.info("✅ Redis connection established")
-        except Exception as e:
-            logger.error(f"❌ Redis connection failed: {e}")
+        # Redis connection established (async operations will fail if not connected)
+        logger.info("✅ Redis client created")
     
     return _redis_client
 

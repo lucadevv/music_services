@@ -108,3 +108,11 @@ youtube_stream_circuit = CircuitBreaker(
     timeout=600,  # 10 minutes
     half_open_timeout=60  # 1 minute
 )
+
+# Circuit breaker para búsquedas en YouTube
+# Protege el servicio cuando hay muchos errores de búsqueda
+youtube_search_circuit = CircuitBreaker(
+    failure_threshold=3,  # Open after 3 failures
+    timeout=600,  # 10 minutes
+    half_open_timeout=60  # 1 minute
+)

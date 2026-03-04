@@ -57,6 +57,12 @@ async def get_watch_playlist(
         True, 
         description="Incluir stream URLs y mejores thumbnails para tracks"
     ),
+    prefetch_count: int = Query(
+        10, 
+        ge=0, 
+        le=50,
+        description="Número de URLs a obtener en paralelo (0 = none, -1 = todas)"
+    ),
     service: WatchService = Depends(get_watch_service),
     stream_service: StreamService = Depends(get_stream_service)
 ) -> Dict[str, Any]:
@@ -66,10 +72,13 @@ async def get_watch_playlist(
     - Requiere `video_id` o `playlist_id` (al menos uno)
     - `radio=true`: Genera una playlist de radio basada en el video/playlist
     - `shuffle=true`: Mezcla las canciones aleatoriamente
+    - `prefetch_count`: Cuántos tracks enriquecer con stream URLs (default: 10)
     
-    Si `include_stream_urls=true`, cada track incluye:
+    Si `include_stream_urls=true` y `prefetch_count > 0`, los primeros N tracks incluyen:
     - `stream_url`: URL directa de audio (mejor calidad)
     - `thumbnail`: URL de thumbnail en mejor calidad
+    
+    El resto de tracks puede obtenerse bajo demanda usando `/stream/{videoId}` o `/stream/batch`.
     """
     if not video_id and not playlist_id:
         raise HTTPException(
@@ -86,17 +95,34 @@ async def get_watch_playlist(
         )
         
         # Enrich tracks with stream URLs and thumbnails
-        if include_stream_urls:
+        # Solo enriquecemos los primeros N tracks para evitar latencia excesiva
+        if include_stream_urls and prefetch_count != 0:
             tracks = playlist_data.get('tracks') or playlist_data.get('items') or []
             if tracks:
-                enriched_tracks = await stream_service.enrich_items_with_streams(
-                    tracks, 
-                    include_stream_urls=True
-                )
-                if 'tracks' in playlist_data:
-                    playlist_data['tracks'] = enriched_tracks
-                elif 'items' in playlist_data:
-                    playlist_data['items'] = enriched_tracks
+                # Si prefetch_count es -1, enriquecer todos; si es > 0, solo los primeros N
+                tracks_to_enrich = tracks if prefetch_count == -1 else tracks[:prefetch_count]
+                tracks_remaining = [] if prefetch_count == -1 else tracks[prefetch_count:]
+                
+                # Enriquecer solo los primeros N tracks
+                if tracks_to_enrich:
+                    enriched_tracks = await stream_service.enrich_items_with_streams(
+                        tracks_to_enrich, 
+                        include_stream_urls=True
+                    )
+                    
+                    # Combinar: primeros N enriquecidos + resto sin enriquecer
+                    if tracks_remaining:
+                        enriched_tracks.extend(tracks_remaining)
+                    
+                    if 'tracks' in playlist_data:
+                        playlist_data['tracks'] = enriched_tracks
+                    elif 'items' in playlist_data:
+                        playlist_data['items'] = enriched_tracks
+                        
+                    # Agregar info de cuántos tienen stream_url
+                    tracks_with_url = sum(1 for t in enriched_tracks if t.get('stream_url'))
+                    playlist_data['stream_urls_prefetched'] = tracks_with_url
+                    playlist_data['stream_urls_total'] = len(enriched_tracks)
         
         return playlist_data
     except Exception as e:
