@@ -132,7 +132,14 @@ def cache_result(ttl: Optional[int] = None):
 
 def clear_cache(pattern: Optional[str] = None):
     """Clear cache entries matching pattern."""
-    pass
+    # This is a sync wrapper - actual implementation is in cache_redis.py
+    try:
+        from app.core.cache_redis import clear_cache as redis_clear_cache
+        import asyncio
+        if pattern:
+            asyncio.create_task(redis_clear_cache(pattern))
+    except Exception:
+        pass
 
 
 def get_cache_stats() -> dict:

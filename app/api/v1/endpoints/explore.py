@@ -6,6 +6,7 @@ from ytmusicapi import YTMusic
 from app.core.ytmusic_client import get_ytmusic
 from app.services.explore_service import ExploreService
 from app.services.stream_service import StreamService
+from app.core.cache import clear_cache
 
 router = APIRouter(tags=["explore"])
 
