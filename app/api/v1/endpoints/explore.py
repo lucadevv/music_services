@@ -156,8 +156,13 @@ async def explore_music(
     # Enrich home content with stream URLs (Quick picks, etc.)
     home = home_data.get("home", [])
     if include_stream_urls and home:
+        logger.info(f"Enriching home with {len(home)} sections")
         stream_service = StreamService()
-        home = await _enrich_home_with_streams(home, stream_service)
+        try:
+            home = await _enrich_home_with_streams(home, stream_service)
+            logger.info(f"Home enrichment complete")
+        except Exception as e:
+            logger.error(f"Error enriching home: {e}")
     
     # Si no hay moods ni home ni charts, entonces sí es un error real
     moods_genres = home_data.get("moods", [])
