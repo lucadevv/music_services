@@ -28,7 +28,7 @@ class StreamService(BaseService):
     
     # TTL para diferentes tipos de datos
     METADATA_TTL = 86400  # 24 horas - metadatos no cambian
-    STREAM_URL_TTL = 14400  # 4 horas - URLs de stream duran más (aumentado de 2h)
+    STREAM_URL_TTL = 1800  # 30 minutos - URLs de stream expiran rápido (~6 horas max)
     
     # Retry config
     MAX_RETRIES = 3
@@ -333,7 +333,8 @@ class StreamService(BaseService):
             # Cache both metadata and stream URL
             # Usar el TTL calculado de YouTube si está disponible
             await self._cache_metadata(video_id, metadata)
-            cache_ttl = min(calculated_ttl, 6*3600) if url_expire else self.STREAM_URL_TTL
+            # Cache URL por máximo 1 hora (o menos si YouTube dice que expira antes)
+            cache_ttl = min(calculated_ttl, 1*3600) if url_expire else self.STREAM_URL_TTL
             await self._cache_stream_url(video_id, audio_url, ttl=cache_ttl)
             
             self.logger.info(f"✅ Retrieved stream URL for: {video_id}")
