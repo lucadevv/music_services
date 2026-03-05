@@ -5,8 +5,52 @@ from ytmusicapi import YTMusic
 
 from app.core.ytmusic_client import get_ytmusic
 from app.services.explore_service import ExploreService
+from app.services.stream_service import StreamService
 
 router = APIRouter(tags=["explore"])
+
+
+async def _enrich_home_with_streams(home: List[Dict[str, Any]], stream_service: StreamService) -> List[Dict[str, Any]]:
+    """
+    Enrich home content (Quick picks, playlists, albums) with stream URLs.
+    
+    Args:
+        home: List of home sections
+        stream_service: Service to get stream URLs
+        
+    Returns:
+        Home content with stream URLs added to playable items
+    """
+    enriched_home = []
+    
+    for section in home:
+        section_title = section.get('title', '')
+        contents = section.get('contents', [])
+        
+        if not contents:
+            enriched_home.append(section)
+            continue
+        
+        # Only process sections with playable content (songs, playlists)
+        # Skip sections that don't have playable items
+        if not isinstance(contents, list):
+            enriched_home.append(section)
+            continue
+        
+        # Check if items have videoId (songs) or playlistId/albums
+        has_songs = any(item.get('videoId') for item in contents if isinstance(item, dict))
+        
+        if has_songs:
+            # Enrich songs with stream URLs
+            enriched_contents = await stream_service.enrich_items_with_streams(
+                contents,
+                include_stream_urls=True
+            )
+            section = {**section, 'contents': enriched_contents}
+        
+        enriched_home.append(section)
+    
+    return enriched_home
 
 
 def get_explore_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> ExploreService:
@@ -109,9 +153,14 @@ async def explore_music(
         logger.warning(f"Failed to get charts (non-critical): {e}")
         # Charts vacíos pero el endpoint sigue funcionando
     
+    # Enrich home content with stream URLs (Quick picks, etc.)
+    home = home_data.get("home", [])
+    if include_stream_urls and home:
+        stream_service = StreamService()
+        home = await _enrich_home_with_streams(home, stream_service)
+    
     # Si no hay moods ni home ni charts, entonces sí es un error real
     moods_genres = home_data.get("moods", [])
-    home = home_data.get("home", [])
     if not moods_genres and not home and not top_songs_data:
         raise HTTPException(
             status_code=500, 
