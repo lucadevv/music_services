@@ -39,7 +39,7 @@ services:
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - ENABLE_COMPRESSION=${ENABLE_COMPRESSION:-true}
       - HTTP_TIMEOUT=${HTTP_TIMEOUT:-30}
-      - MAX_WORKERS=${MAX_WORKERS:-10}
+      - MAX_WORKERS=${MAX_WORKERS:-4}
     volumes:
       - ./browser.json:/app/browser.json:ro
     depends_on:
@@ -56,11 +56,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 512M
+          cpus: '4.0'
+          memory: 2G
         reservations:
-          cpus: '0.5'
-          memory: 256M
+          cpus: '2.0'
+          memory: 1G
 
   # Perfil de desarrollo con hot reload
   music_services_dev:
@@ -113,7 +113,7 @@ services:
     restart: unless-stopped
     ports:
       - "${REDIS_EXTERNAL_PORT:-6380}:6379"
-    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
     volumes:
       - ytmusic_redis_data:/data
     networks:
@@ -127,11 +127,11 @@ services:
     deploy:
       resources:
         limits:
+          cpus: '1.0'
+          memory: 768M
+        reservations:
           cpus: '0.5'
           memory: 256M
-        reservations:
-          cpus: '0.25'
-          memory: 128M
 
 networks:
   music_app_network:

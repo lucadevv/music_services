@@ -32,7 +32,9 @@ async def get_redis_client() -> redis.Redis:
             db=settings.REDIS_DB or 0,
             password=settings.REDIS_PASSWORD or None,
             decode_responses=True,
-            max_connections=10,
+            max_connections=200,
+            socket_keepalive=True,
+            socket_connect_timeout=5,
         )
         _redis_client = redis.Redis(connection_pool=_redis_pool)
         
@@ -142,6 +144,46 @@ async def get_cached_ttl(key: str) -> int:
     return -1
 
 
+async def get_cached_value_with_stale(key: str, stale_ttl: int = 300) -> Optional[Any]:
+    """
+    Get cached value, allowing stale data within grace period.
+    
+    Args:
+        key: Cache key
+        stale_ttl: Additional seconds to allow stale data (default 5 min)
+    
+    Returns:
+        Cached value if fresh or stale, None if not found
+    """
+    if not settings.CACHE_ENABLED:
+        return None
+    
+    try:
+        client = await get_redis_client()
+        value = await client.get(key)
+        if value:
+            return json.loads(value)
+        
+        timestamp_key = f"{key}:timestamp"
+        timestamp = await client.get(timestamp_key)
+        
+        if timestamp:
+            try:
+                ts = float(timestamp)
+                default_ttl = 18000  # 5 hours for streams
+                if (time.time() - ts) < (default_ttl + stale_ttl):
+                    value = await client.get(key)
+                    if value:
+                        logger.debug(f"Serving stale cache for {key}")
+                        return json.loads(value)
+            except (ValueError, TypeError):
+                pass
+                
+    except Exception as e:
+        logger.warning(f"Error getting cached value with stale for {key}: {e}")
+    return None
+
+
 async def has_cached_key(key: str) -> bool:
     """Check if a key exists in cache."""
     if not settings.CACHE_ENABLED:
@@ -153,7 +195,118 @@ async def has_cached_key(key: str) -> bool:
         return exists
     except Exception as e:
         logger.warning(f"Error checking cache key {key}: {e}")
-    return False
+        return False
+
+
+async def get_cached_values_batch(keys: list[str]) -> dict[str, Optional[Any]]:
+    """
+    Get multiple cached values in ONE Redis call using MGET.
+    Returns dict of key -> value (or None if not found/expired).
+    
+    Args:
+        keys: List of cache keys to fetch
+        
+    Returns:
+        Dict mapping key to cached value (None if not found or expired)
+    """
+    if not settings.CACHE_ENABLED or not keys:
+        return {}
+    
+    try:
+        client = await get_redis_client()
+        
+        # Get timestamp keys for TTL checking
+        timestamp_keys = [f"{key}:timestamp" for key in keys]
+        
+        # Single MGET for all values and timestamps
+        values = await client.mget(keys)
+        timestamps = await client.mget(timestamp_keys)
+        
+        result = {}
+        current_time = time.time()
+        
+        for i, key in enumerate(keys):
+            value = values[i]
+            timestamp_str = timestamps[i]
+            
+            if value is None:
+                result[key] = None
+                continue
+            
+            # Check if expired
+            if timestamp_str:
+                try:
+                    timestamp = float(timestamp_str)
+                    # Default TTL for stream URLs is 5 hours (18000s)
+                    ttl = 18000
+                    if (current_time - timestamp) >= ttl:
+                        result[key] = None
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            
+            try:
+                result[key] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                result[key] = value
+        
+        return result
+    except Exception as e:
+        logger.warning(f"Error getting cached values batch: {e}")
+        return {key: None for key in keys}
+
+
+async def get_cached_values_batch_with_ttl(keys: list[str], ttl: int = 18000) -> dict[str, Optional[Any]]:
+    """
+    Get multiple cached values with custom TTL.
+    
+    Args:
+        keys: List of cache keys to fetch
+        ttl: TTL in seconds (default 5 hours for stream URLs)
+        
+    Returns:
+        Dict mapping key to cached value
+    """
+    if not settings.CACHE_ENABLED or not keys:
+        return {}
+    
+    try:
+        client = await get_redis_client()
+        
+        timestamp_keys = [f"{key}:timestamp" for key in keys]
+        
+        values = await client.mget(keys)
+        timestamps = await client.mget(timestamp_keys)
+        
+        result = {}
+        current_time = time.time()
+        
+        for i, key in enumerate(keys):
+            value = values[i]
+            timestamp_str = timestamps[i]
+            
+            if value is None:
+                result[key] = None
+                continue
+            
+            if timestamp_str:
+                try:
+                    timestamp = float(timestamp_str)
+                    if (current_time - timestamp) >= ttl:
+                        result[key] = None
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            
+            try:
+                result[key] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                result[key] = value
+        
+        return result
+    except Exception as e:
+        logger.warning(f"Error getting cached values batch with TTL: {e}")
+        return {key: None for key in keys}
 
 
 async def delete_cached_key(key: str) -> bool:
@@ -166,6 +319,54 @@ async def delete_cached_key(key: str) -> bool:
     except Exception as e:
         logger.warning(f"Error deleting cache key {key}: {e}")
     return False
+
+# ==========================================
+# Dynamic Stream Tracking for Background Refresh
+# ==========================================
+
+async def track_active_stream(video_id: str) -> None:
+    """
+    Track a stream as 'active' by adding it to a Redis Sorted Set.
+    The score is the current timestamp, so we can periodically clean up old entries
+    and only background-refresh streams people are actually listening to.
+    """
+    if not settings.CACHE_ENABLED:
+        return
+        
+    try:
+        client = await get_redis_client()
+        current_time = time.time()
+        # ZADD adds or updates the score (timestamp) of the video_id
+        await client.zadd("music:active_streams", {video_id: current_time})
+        logger.debug(f"Tracked active stream: {video_id}")
+    except Exception as e:
+        logger.warning(f"Error tracking active stream {video_id}: {e}")
+
+async def get_active_streams(max_idle_time: int = 86400, limit: int = 50) -> list[str]:
+    """
+    Get a list of active streams (video_ids) that were requested recently.
+    
+    Args:
+        max_idle_time: How many seconds of inactivity before a stream is no longer 'active'.
+        limit: Maximum number of active streams to return.
+    """
+    if not settings.CACHE_ENABLED:
+        return []
+        
+    try:
+        client = await get_redis_client()
+        current_time = time.time()
+        min_score = current_time - max_idle_time
+        
+        # Cleanup old streams first
+        await client.zremrangebyscore("music:active_streams", "-inf", min_score)
+        
+        # Get the most recently requested streams (highest score)
+        active_streams = await client.zrevrange("music:active_streams", 0, limit - 1)
+        return active_streams
+    except Exception as e:
+        logger.warning(f"Error getting active streams: {e}")
+        return []
 
 
 async def clear_cache(pattern: Optional[str] = None):
@@ -256,4 +457,6 @@ cache_module = {
     'has_cached_key': has_cached_key,
     'clear_cache': clear_cache,
     'get_cache_stats': get_cache_stats,
+    'track_active_stream': track_active_stream,
+    'get_active_streams': get_active_streams,
 }

@@ -13,6 +13,7 @@ from app.core.cache_redis import (
     set_cached_value,
     get_cached_timestamp,
     has_cached_key,
+    get_cached_values_batch_with_ttl,
 )
 from app.core.circuit_breaker import youtube_stream_circuit
 from app.core.exceptions import (
@@ -28,16 +29,27 @@ class StreamService(BaseService):
     
     # TTL para diferentes tipos de datos
     METADATA_TTL = 86400  # 24 horas - metadatos no cambian
-    STREAM_URL_TTL = 1800  # 30 minutos - URLs de stream expiran rápido (~6 horas max)
+    STREAM_URL_TTL = 18000  # 5 horas - URLs de stream expiran ~6 horas
     
     # Retry config
     MAX_RETRIES = 3
     BASE_DELAY = 2  # segundos
     
+    # Singleton instance
+    _instance: Optional['StreamService'] = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
     def __init__(self):
-        """Initialize the stream service."""
+        if self._initialized:
+            return
         super().__init__()
         self.settings = get_settings()
+        self._initialized = True
     
     def _get_metadata_cache_key(self, video_id: str) -> str:
         """Generate cache key for metadata."""
@@ -210,21 +222,20 @@ class StreamService(BaseService):
                 'nocheckcertificate': True,
                 'extractor_args': {
                     'youtube': {
-                        # Android tiene mejores streams de audio
-                        'player_client': ['android', 'web', 'default'],
+                        'player_client': ['android'],  # Faster - android first
                     }
                 },
                 'http_headers': {
                     'User-Agent': 'com.google.android.youtube/19.02.39 (Linux; U; Android 13; en_US) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5',
                 },
-                'socket_timeout': 60,
-                'retries': 3,
+                'socket_timeout': 30,
+                'retries': 2,
                 'check_runtime': False,
                 'no_color': True,
-                # No limitar a formatos específicos para obtener todos los formats
                 'allow_unplayable_formats': True,
+                # Optimize for speed
+                'no_warnings': True,
+                'quiet': True,
             }
             
             def extract_info_with_retry(attempt: int = 0) -> Dict[str, Any]:
@@ -464,29 +475,22 @@ class StreamService(BaseService):
         include_stream_urls: bool = True
     ) -> List[Dict[str, Any]]:
         """
-        Enrich multiple items with stream URLs and best thumbnails in parallel.
-        
-        OPTIMIZADO: 
-        1. Primero verifica qué URLs ya están cacheadas (instantáneo)
-        2. Solo llama a yt-dlp para las que NO están cacheadas
-        3. делает llamadas en paralelo para máximo rendimiento
+        Enrich multiple items with stream URLs and best thumbnails.
+        OPTIMIZED: Uses Redis MGET for batch cache checks.
         """
         if not items:
             return []
         
         self.logger.debug(f"Enriching {len(items)} items with streams")
         
-        # Primero, enriquecer thumbnails (siempre rápido)
-        items_with_thumbnails = []
-        for item in items:
-            enriched = item.copy()
-            enriched['thumbnail'] = self._get_best_thumbnail(item)
-            items_with_thumbnails.append(enriched)
+        items_with_thumbnails = [
+            {**item, 'thumbnail': self._get_best_thumbnail(item)}
+            for item in items
+        ]
         
         if not include_stream_urls:
             return items_with_thumbnails
         
-        # Extraer video IDs
         video_ids = [
             item.get('videoId') or item.get('video_id')
             for item in items_with_thumbnails
@@ -496,28 +500,32 @@ class StreamService(BaseService):
         if not video_ids:
             return items_with_thumbnails
         
-        # FASE 1: Verificar cuáles están cacheadas (instantáneo)
+        # Build cache keys
+        cache_keys = [self._get_stream_url_cache_key(vid) for vid in video_ids]
+        
+        # FASE 1: Batch check cache with ONE Redis MGET call
+        cached_values = await get_cached_values_batch_with_ttl(cache_keys, self.STREAM_URL_TTL)
+        
         cached_urls = {}
         uncached_video_ids = []
         
-        for vid in video_ids:
-            cached_url = await self._get_cached_stream_url(vid)
-            if cached_url:
-                cached_urls[vid] = cached_url
-                self.logger.debug(f"⚡ Cache HIT: {vid}")
+        for vid, cache_key in zip(video_ids, cache_keys):
+            cached_value = cached_values.get(cache_key)
+            if cached_value:
+                cached_urls[vid] = cached_value
+                self.logger.debug(f"Cache HIT: {vid}")
             else:
                 uncached_video_ids.append(vid)
         
-        self.logger.info(f"📊 Cache stats: {len(cached_urls)} cached, {len(uncached_video_ids)} need fetch")
+        self.logger.info(f"Cache stats: {len(cached_urls)} cached, {len(uncached_video_ids)} need fetch")
         
-        # FASE 2: Obtener URLs no cacheadas en paralelo
+        # FASE 2: Fetch uncached URLs in parallel
         if uncached_video_ids:
-            self.logger.info(f"🔄 Fetching {len(uncached_video_ids)} stream URLs...")
+            self.logger.info(f"Fetching {len(uncached_video_ids)} stream URLs...")
             
             stream_tasks = [self._safe_get_stream_url(vid) for vid in uncached_video_ids]
             stream_results = await asyncio.gather(*stream_tasks, return_exceptions=True)
             
-            # Procesar resultados
             for i, result in enumerate(stream_results):
                 vid = uncached_video_ids[i]
                 if isinstance(result, dict):
@@ -525,7 +533,7 @@ class StreamService(BaseService):
                     if url:
                         cached_urls[vid] = url
         
-        # FASE 3: Combinar resultados
+        # FASE 3: Combine results
         enriched_items = []
         for item in items_with_thumbnails:
             enriched_item = item.copy()

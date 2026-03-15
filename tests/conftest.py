@@ -389,11 +389,11 @@ async def async_client(mock_ytmusic):
 # ============================================================================
 
 @pytest.fixture(autouse=True)
-def reset_cache():
+async def reset_cache():
     """Reset cache before each test."""
-    clear_cache()
+    await clear_cache()
     yield
-    clear_cache()
+    await clear_cache()
 
 
 # ============================================================================

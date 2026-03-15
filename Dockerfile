@@ -50,5 +50,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application
+# Run the application with uvicorn workers
 CMD ["python", "servicio_ytmusic.py"]
+
+# For Kubernetes/HPA, use:
+# CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

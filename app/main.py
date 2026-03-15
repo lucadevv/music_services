@@ -173,6 +173,31 @@ async def add_process_time_header(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def add_cache_headers(request: Request, call_next):
+    """Add caching headers for GET requests."""
+    response = await call_next(request)
+    
+    # Only cache GET requests
+    if request.method == "GET" and response.status_code == 200:
+        path = request.url.path
+        
+        # Don't cache endpoints that might have user-specific data
+        if not any(x in path for x in ["/library/", "/stats", "/history", "/suggestions"]):
+            # Cache based on endpoint type
+            if "/search" in path:
+                response.headers["Cache-Control"] = "public, max-age=300"  # 5 min
+            elif "/explore" in path or "/charts" in path:
+                response.headers["Cache-Control"] = "public, max-age=1800"  # 30 min
+            elif "/playlists/" in path or "/album/" in path:
+                response.headers["Cache-Control"] = "public, max-age=3600"  # 1 hour
+            elif "/stream/" in path or "/watch" in path:
+                # Stream URLs shouldn't be cached at HTTP level (Redis handles this)
+                pass
+    
+    return response
+
+
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 

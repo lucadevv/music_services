@@ -1,13 +1,16 @@
 """Main entry point for YouTube Music Service."""
 import uvicorn
-from app.main import app
-from app.core.config import get_settings
 
 if __name__ == "__main__":
-    settings = get_settings()
     uvicorn.run(
-        app, 
-        host=settings.HOST, 
-        port=settings.PORT,
-        log_level="info"
+        "app.main:app", 
+        host="0.0.0.0", 
+        port=8000,
+        workers=4,
+        log_level="warning",
+        access_log=False,
+        limit_concurrency=2000,
+        limit_max_requests=10000,
+        timeout_keep_alive=30,
+        backlog=4096,
     )

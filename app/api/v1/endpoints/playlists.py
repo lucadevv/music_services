@@ -79,6 +79,13 @@ async def get_playlist(
     Si `include_stream_urls=true` y `prefetch_count > 0`, los primeros N tracks incluyen:
     - `stream_url`: URL directa de audio (mejor calidad)
     """
+    from app.core.cache_redis import get_cached_value, set_cached_value
+    
+    cache_key = f"music:endpoint:playlist:{playlist_id}:{limit}:{start_index}:{include_stream_urls}:{prefetch_count}"
+    cached = await get_cached_value(cache_key)
+    if cached:
+        return cached
+    
     try:
         playlist_data = await service.get_playlist(
             playlist_id, 
@@ -88,42 +95,40 @@ async def get_playlist(
             start_index
         )
         
-        # Apply limit/offset AFTER service returns - ytmusicapi may ignore limit
+        # Apply limit/offset AFTER service returns
         if playlist_data.get('tracks'):
             tracks = playlist_data['tracks']
-            # Apply start_index
             if start_index > 0 and start_index < len(tracks):
                 tracks = tracks[start_index:]
-            # Apply limit
             if limit > 0 and limit < len(tracks):
                 tracks = tracks[:limit]
             playlist_data['tracks'] = tracks
         
-        # Enrich tracks with stream URLs - solo los primeros N para evitar latencia
+        # Enrich tracks with stream URLs
         if include_stream_urls and prefetch_count != 0 and playlist_data.get('tracks'):
             tracks = playlist_data['tracks']
-            
-            # Si prefetch_count es -1, enriquecer todos; si es > 0, solo los primeros N
             tracks_to_enrich = tracks if prefetch_count == -1 else tracks[:prefetch_count]
             tracks_remaining = [] if prefetch_count == -1 else tracks[prefetch_count:]
             
-            # Enriquecer solo los primeros N tracks
             if tracks_to_enrich:
                 enriched_tracks = await stream_service.enrich_items_with_streams(
                     tracks_to_enrich, 
                     include_stream_urls=True
                 )
                 
-                # Combinar: primeros N enriquecidos + resto sin enriquecer
                 if tracks_remaining:
                     enriched_tracks.extend(tracks_remaining)
                 
                 playlist_data['tracks'] = enriched_tracks
-                
-                # Info de cuántos tienen stream_url
                 tracks_with_url = sum(1 for t in enriched_tracks if t.get('stream_url'))
                 playlist_data['stream_urls_prefetched'] = tracks_with_url
                 playlist_data['stream_urls_total'] = len(enriched_tracks)
+        
+        # Cache por 10 min
+        try:
+            await set_cached_value(cache_key, playlist_data, ttl=600)
+        except Exception:
+            pass
         
         return playlist_data
     except Exception as e:

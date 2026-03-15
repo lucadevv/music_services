@@ -59,7 +59,7 @@ async def search_music(
         examples=["songs"]
     ),
     scope: Optional[str] = Query(None, description="Scope de búsqueda"),
-    limit: int = Query(20, ge=1, le=50, description="Número de resultados"),
+    limit: int = Query(10, ge=1, le=50, description="Número de resultados"),
     start_index: int = Query(0, ge=0, description="Índice inicial para paginación"),
     ignore_spelling: bool = Query(False, description="Ignorar sugerencias de ortografía"),
     include_stream_urls: bool = Query(
@@ -91,6 +91,14 @@ async def search_music(
     q = validate_search_query(q)
     filter = validate_search_filter(filter)
     
+    # Cache key based on all params
+    cache_key = f"music:endpoint:search:{q}:{filter}:{scope}:{limit}:{start_index}:{include_stream_urls}"
+    from app.core.cache_redis import get_cached_value, set_cached_value
+    
+    cached = await get_cached_value(cache_key)
+    if cached:
+        return cached
+    
     # Search - exceptions handled by global handlers
     results = await service.search(q, filter, scope, limit, ignore_spelling, start_index)
     
@@ -120,7 +128,15 @@ async def search_music(
                     # Replace the entire result with the enriched version (which has all fields)
                     results[i] = enriched_map[video_id]
     
-    return {"results": results, "query": q}
+    response = {"results": results, "query": q}
+    
+    # Cache by 5 min
+    try:
+        await set_cached_value(cache_key, response, ttl=300)
+    except Exception:
+        pass
+    
+    return response
 
 
 @router.get(
@@ -153,12 +169,19 @@ async def get_search_suggestions(
     - `VALIDATION_ERROR` (400): Query vacío
     - `EXTERNAL_SERVICE_ERROR` (502): Error de YouTube Music
     """
-    # Validate query
-    q = validate_search_query(q)
+    from app.core.cache_redis import get_cached_value, set_cached_value
     
-    # Get suggestions - exceptions handled by global handlers
+    cache_key = f"music:endpoint:search:suggestions:{q.lower()}"
+    cached = await get_cached_value(cache_key)
+    if cached:
+        return cached
+    
+    q = validate_search_query(q)
     suggestions = await service.get_search_suggestions(q)
-    return {"suggestions": suggestions}
+    response = {"suggestions": suggestions}
+    
+    await set_cached_value(cache_key, response, ttl=600)
+    return response
 
 
 @router.delete(

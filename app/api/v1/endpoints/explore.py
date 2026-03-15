@@ -95,7 +95,7 @@ def get_explore_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> ExploreServi
 )
 async def explore_music(
     include_stream_urls: bool = Query(
-        True, 
+        False, 
         description="Incluir stream URLs y mejores thumbnails para charts"
     ),
     service: ExploreService = Depends(get_explore_service)
@@ -110,22 +110,33 @@ async def explore_music(
     Cada categoría en `moods_genres` tiene un campo `params` que puedes usar en `/explore/moods/{params}`.
     """
     import logging
+    import hashlib
+    import json
+    from app.core.cache_redis import get_cached_value, set_cached_value
+    from app.core.config import get_settings
+    from datetime import datetime
+    
     logger = logging.getLogger("explore")
+    settings = get_settings()
+    
+    cache_key = f"music:endpoint:explore:include_stream_urls={include_stream_urls}"
+    
+    cached = await get_cached_value(cache_key)
+    if cached:
+        logger.info("Returning cached explore data")
+        return cached
     
     try:
-        # Get home with moods
         home_data = await service.get_home_with_moods()
     except Exception as e:
         logger.warning(f"Failed to get home with moods: {e}")
         home_data = {"home": [], "moods": []}
     
-    # Get charts - tolerante a fallos para no bloquear toda la respuesta
     top_songs_data = []
     trending_data = []
     try:
         charts = await service.get_charts()
         
-        # Adapt charts response
         top_songs_data = charts.get('top_songs', [])
         if not top_songs_data:
             top_songs_data = charts.get('videos', [])
@@ -134,14 +145,13 @@ async def explore_music(
         if not trending_data:
             trending_data = top_songs_data
         
-        # Enrich charts with stream URLs and thumbnails
         if include_stream_urls:
             from app.services.stream_service import StreamService
             stream_service = StreamService()
             
             if top_songs_data:
                 top_songs_data = await stream_service.enrich_items_with_streams(
-                    top_songs_data, 
+                    top_songs_data,
                     include_stream_urls=True
                 )
             
@@ -152,9 +162,8 @@ async def explore_music(
                 )
     except Exception as e:
         logger.warning(f"Failed to get charts (non-critical): {e}")
-        # Charts vacíos pero el endpoint sigue funcionando
     
-    # Enrich home content with stream URLs (Quick picks, etc.)
+    # Enrich home content with stream URLs
     home = home_data.get("home", [])
     if include_stream_urls and home:
         logger.info(f"Enriching home with {len(home)} sections")
@@ -173,7 +182,7 @@ async def explore_music(
             detail="No se pudo obtener contenido de exploración. YouTube Music no responde."
         )
     
-    return {
+    response = {
         "moods_genres": moods_genres,
         "home": home,
         "charts": {
@@ -185,6 +194,14 @@ async def explore_music(
             "charts_usage": "Las canciones en 'charts' incluyen 'stream_url' y 'thumbnail' (mejor calidad) si include_stream_urls=true."
         }
     }
+    
+    # Cachear respuesta por 10 minutos
+    try:
+        await set_cached_value(cache_key, response, ttl=600)
+    except Exception as e:
+        logger.debug(f"Failed to cache explore response: {e}")
+    
+    return response
 
 
 @router.get(
@@ -231,12 +248,22 @@ async def get_mood_categories(
     - `params`: Usar en `/explore/moods/{params}` para obtener playlists
     - `title`: Nombre de la categoría
     """
+    from app.core.cache_redis import get_cached_value, set_cached_value
+    
+    cache_key = "music:endpoint:explore:moods:categories"
+    cached = await get_cached_value(cache_key)
+    if cached:
+        return cached
+    
     try:
         categories = await service.get_mood_categories()
-        return {
+        response = {
             "categories": categories,
             "structure": "Las categorías están organizadas en secciones: 'For you', 'Genres', 'Moods & moments'"
         }
+        # Cache por 30 minutos (los moods no cambian frecuentemente)
+        await set_cached_value(cache_key, response, ttl=1800)
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -419,7 +446,7 @@ async def get_charts(
         description="Código de país ISO 3166-1 Alpha-2 (ej: 'US', 'PE'). Default: global"
     ),
     include_stream_urls: bool = Query(
-        True, 
+        False, 
         description="Incluir stream URLs y mejores thumbnails"
     ),
     service: ExploreService = Depends(get_explore_service)
@@ -435,10 +462,16 @@ async def get_charts(
     - `stream_url`: URL directa de audio (mejor calidad)
     - `thumbnail`: URL de thumbnail en mejor calidad
     """
+    from app.core.cache_redis import get_cached_value, set_cached_value
+    
+    cache_key = f"music:endpoint:charts:{country or 'global'}:{include_stream_urls}"
+    cached = await get_cached_value(cache_key)
+    if cached:
+        return cached
+    
     try:
         charts = await service.get_charts(country)
         
-        # Ensure we have top_songs and trending
         top_songs_data = charts.get('top_songs', [])
         if not top_songs_data:
             top_songs_data = charts.get('videos', [])
@@ -466,11 +499,18 @@ async def get_charts(
                     include_stream_urls=True
                 )
         
-        return {
+        response = {
             "top_songs": top_songs_data,
             "trending": trending_data,
             "country": country or "global"
         }
+        
+        try:
+            await set_cached_value(cache_key, response, ttl=600)
+        except Exception:
+            pass
+        
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

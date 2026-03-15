@@ -55,7 +55,7 @@ async def get_watch_playlist(
     radio: bool = Query(False, description="Obtener playlist de radio"),
     shuffle: bool = Query(False, description="Obtener playlist en modo shuffle"),
     include_stream_urls: bool = Query(
-        True, 
+        False, 
         description="Incluir stream URLs y mejores thumbnails para tracks"
     ),
     prefetch_count: int = Query(
@@ -86,6 +86,14 @@ async def get_watch_playlist(
             status_code=400, 
             detail="Se requiere 'video_id' o 'playlist_id'"
         )
+    
+    from app.core.cache_redis import get_cached_value, set_cached_value
+    
+    cache_key = f"music:endpoint:watch:{video_id or ''}:{playlist_id or ''}:{limit}:{start_index}:{radio}:{shuffle}:{include_stream_urls}:{prefetch_count}"
+    cached = await get_cached_value(cache_key)
+    if cached:
+        return cached
+    
     try:
         playlist_data = await service.get_watch_playlist(
             video_id=video_id,
@@ -95,36 +103,30 @@ async def get_watch_playlist(
             shuffle=shuffle
         )
         
-        # Enrich tracks with stream URLs and thumbnails
-        # Solo enriquecemos los primeros N tracks para evitar latencia excesiva
+        # Enrich tracks with stream URLs
         if include_stream_urls and prefetch_count != 0:
             tracks = playlist_data.get('tracks') or playlist_data.get('items') or []
             if tracks:
-                # Apply pagination after getting all tracks
                 if start_index > 0 and start_index < len(tracks):
                     tracks = tracks[start_index:]
                 
                 if limit > 0 and limit < len(tracks):
                     tracks = tracks[:limit]
                 
-                # Update tracks in playlist_data with pagination applied
                 if 'tracks' in playlist_data:
                     playlist_data['tracks'] = tracks
                 elif 'items' in playlist_data:
                     playlist_data['items'] = tracks
                 
-                # Si prefetch_count es -1, enriquecer todos; si es > 0, solo los primeros N
                 tracks_to_enrich = tracks if prefetch_count == -1 else tracks[:prefetch_count]
                 tracks_remaining = [] if prefetch_count == -1 else tracks[prefetch_count:]
                 
-                # Enriquecer solo los primeros N tracks
                 if tracks_to_enrich:
                     enriched_tracks = await stream_service.enrich_items_with_streams(
                         tracks_to_enrich, 
                         include_stream_urls=True
                     )
                     
-                    # Combinar: primeros N enriquecidos + resto sin enriquecer
                     if tracks_remaining:
                         enriched_tracks.extend(tracks_remaining)
                     
@@ -133,12 +135,10 @@ async def get_watch_playlist(
                     elif 'items' in playlist_data:
                         playlist_data['items'] = enriched_tracks
                         
-                    # Agregar info de cuántos tienen stream_url
                     tracks_with_url = sum(1 for t in enriched_tracks if t.get('stream_url'))
                     playlist_data['stream_urls_prefetched'] = tracks_with_url
                     playlist_data['stream_urls_total'] = len(enriched_tracks)
         else:
-            # Apply pagination even when not enriching with stream URLs
             tracks = playlist_data.get('tracks') or playlist_data.get('items') or []
             if tracks:
                 if start_index > 0 and start_index < len(tracks):
@@ -149,6 +149,11 @@ async def get_watch_playlist(
                     playlist_data['tracks'] = tracks
                 elif 'items' in playlist_data:
                     playlist_data['items'] = tracks
+        
+        try:
+            await set_cached_value(cache_key, playlist_data, ttl=300)
+        except Exception:
+            pass
         
         return playlist_data
     except Exception as e:
