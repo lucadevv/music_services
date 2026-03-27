@@ -29,7 +29,7 @@ class StreamService(BaseService):
     
     # TTL para diferentes tipos de datos
     METADATA_TTL = 86400  # 24 horas - metadatos no cambian
-    STREAM_URL_TTL = 18000  # 5 horas - URLs de stream expiran ~6 horas
+    STREAM_URL_TTL = 3600  # 1 hora - max cache real (YouTube URLs expiran ~6h pero cacheamos 1h)
     
     # Retry config
     MAX_RETRIES = 3
@@ -84,34 +84,19 @@ class StreamService(BaseService):
         return None
     
     async def _get_cached_stream_url(self, video_id: str) -> Optional[str]:
-        """Get cached stream URL if available and not expired (async)."""
+        """Get cached stream URL if available. Redis TTL handles expiry automatically."""
         if not self.settings.CACHE_ENABLED:
             return None
         
         cache_key = self._get_stream_url_cache_key(video_id)
         
         try:
-            # Check if key exists
-            if not await has_cached_key(cache_key):
-                self.logger.debug(f"Cache MISS (no key) for stream URL: {video_id}")
-                return None
-            
-            # Get timestamp to check TTL
-            timestamp = await get_cached_timestamp(cache_key)
-            if timestamp > 0:
-                elapsed = time.time() - timestamp
-                if elapsed < self.STREAM_URL_TTL:
-                    cached_url = await get_cached_value(cache_key)
-                    if cached_url:
-                        remaining = int(self.STREAM_URL_TTL - elapsed)
-                        self.logger.info(f"✅ Cache HIT for stream URL: {video_id} (expires in {remaining}s)")
-                        return cached_url
-                    else:
-                        self.logger.warning(f"Cache key exists but value is None for: {video_id}")
-                else:
-                    self.logger.debug(f"Cache EXPIRED for stream URL: {video_id} (elapsed: {int(elapsed)}s)")
+            cached_url = await get_cached_value(cache_key)
+            if cached_url:
+                self.logger.info(f"✅ Cache HIT for stream URL: {video_id}")
+                return cached_url
             else:
-                self.logger.debug(f"Cache has no timestamp for: {video_id}")
+                self.logger.debug(f"Cache MISS for stream URL: {video_id}")
         except Exception as e:
             self.logger.warning(f"Error getting cached stream URL: {e}")
         
@@ -198,11 +183,17 @@ class StreamService(BaseService):
             
             if cached_metadata and cached_stream_url:
                 self.logger.info(f"🎯 Fully cached response for: {video_id}")
-                return {**cached_metadata, "url": cached_stream_url, "streamUrl": cached_stream_url, "stream_url": cached_stream_url, "from_cache": True}
+                return {
+                    "streamUrl": cached_stream_url,
+                    "title": cached_metadata.get("title"),
+                    "artist": cached_metadata.get("artist"),
+                    "duration": cached_metadata.get("duration"),
+                    "thumbnail": cached_metadata.get("thumbnail"),
+                    "from_cache": True
+                }
             elif cached_stream_url:
-                # Stream URL cached but no metadata (shouldn't happen, but handle it)
                 self.logger.info(f"⚡ Stream URL cached for: {video_id}")
-                return {"url": cached_stream_url, "streamUrl": cached_stream_url, "stream_url": cached_stream_url, "from_cache": True}
+                return {"streamUrl": cached_stream_url, "from_cache": True}
         
         self.logger.info(f"🔄 Fetching fresh stream URL for: {video_id} (bypass_cache={bypass_cache})")
         
@@ -349,7 +340,7 @@ class StreamService(BaseService):
             await self._cache_stream_url(video_id, audio_url, ttl=cache_ttl)
             
             self.logger.info(f"✅ Retrieved stream URL for: {video_id}")
-            return {**metadata, "url": audio_url, "streamUrl": audio_url, "stream_url": audio_url, "from_cache": False}
+            return {**metadata, "streamUrl": audio_url, "from_cache": False}
         
         except (CircuitBreakerError, RateLimitError, ExternalServiceError, ValidationError):
             raise
@@ -457,11 +448,9 @@ class StreamService(BaseService):
         if video_id:
             try:
                 stream_data = await self.get_stream_url(video_id)
-                # Fix: buscar streamUrl (camelCase) que es lo que devuelve get_stream_url
-                if stream_data.get('streamUrl'):
-                    enriched['stream_url'] = stream_data['streamUrl']
-                elif stream_data.get('stream_url'):
-                    enriched['stream_url'] = stream_data['stream_url']
+                stream_url = stream_data.get('streamUrl')
+                if stream_url:
+                    enriched['stream_url'] = stream_url
                 if stream_data.get('thumbnail'):
                     enriched['thumbnail'] = stream_data['thumbnail']
             except Exception:

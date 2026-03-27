@@ -6,6 +6,9 @@ import time
 import asyncio
 
 from app.core.ytmusic_client import get_ytmusic
+from app.core.exceptions import YTMusicServiceException
+from app.schemas.watch import WatchPlaylistResponse
+from app.schemas.errors import COMMON_ERROR_RESPONSES
 from app.services.watch_service import WatchService
 from app.services.stream_service import StreamService
 
@@ -42,6 +45,7 @@ def get_stream_service() -> StreamService:
 
 @router.get(
     "/",
+    response_model=Dict[str, Any],
     summary="Get watch playlist",
     description="Obtiene la playlist de reproducción (siguientes canciones) basada en un video o playlist. Soporta radio y shuffle.",
     response_description="Playlist de reproducción con tracks",
@@ -194,5 +198,7 @@ async def get_watch_playlist(
             _recent_requests[request_key] = (current_time, playlist_data)
         
         return playlist_data
+    except YTMusicServiceException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -4,6 +4,9 @@ from typing import Optional, Dict, Any, List
 from ytmusicapi import YTMusic
 
 from app.core.ytmusic_client import get_ytmusic
+from app.core.exceptions import YTMusicServiceException
+from app.schemas.explore import ExploreResponse, MoodCategoriesResponse, MoodPlaylistsResponse, ChartsResponse
+from app.schemas.errors import COMMON_ERROR_RESPONSES
 from app.services.explore_service import ExploreService
 from app.services.stream_service import StreamService
 from app.core.cache import clear_cache
@@ -61,6 +64,7 @@ def get_explore_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> ExploreServi
 
 @router.get(
     "/",
+    response_model=Dict[str, Any],
     summary="Get explore content",
     description="Obtiene contenido de exploración: moods, géneros, charts y home. Incluye top songs y trending con stream URLs opcionales.",
     response_description="Contenido de exploración con moods, géneros y charts",
@@ -150,6 +154,8 @@ async def explore_music(
     
     try:
         home_data = await service.get_home_with_moods()
+    except YTMusicServiceException:
+        raise
     except Exception as e:
         logger.warning(f"Failed to get home with moods: {e}")
         home_data = {"home": [], "moods": []}
@@ -214,6 +220,8 @@ async def explore_music(
         # Calculate stream URL stats for response
         top_songs_with_url = sum(1 for t in top_songs_data if t.get('stream_url'))
         trending_with_url = sum(1 for t in trending_data if t.get('stream_url'))
+    except YTMusicServiceException:
+        raise
     except Exception as e:
         logger.warning(f"Failed to get charts (non-critical): {e}")
     
@@ -225,6 +233,8 @@ async def explore_music(
         try:
             home = await _enrich_home_with_streams(home, stream_service)
             logger.info(f"Home enrichment complete")
+        except YTMusicServiceException:
+            raise
         except Exception as e:
             logger.error(f"Error enriching home: {e}")
     
@@ -267,6 +277,7 @@ async def explore_music(
 
 @router.get(
     "/moods",
+    response_model=Dict[str, Any],
     summary="Get mood categories",
     description="Obtiene todas las categorías de moods y géneros disponibles en YouTube Music.",
     response_description="Categorías organizadas por secciones",
@@ -325,15 +336,18 @@ async def get_mood_categories(
         # Cache por 30 minutos (los moods no cambian frecuentemente)
         await set_cached_value(cache_key, response, ttl=1800)
         return response
+    except YTMusicServiceException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get(
     "/moods/{params}",
-    summary="Get playlists by mood/genre",
-    description="Obtiene playlists de un mood o género específico usando el `params` de una categoría.",
-    response_description="Lista de playlists del mood/género",
+    response_model=Dict[str, Any],
+    summary="Get mood/genre playlists",
+    description="Obtiene playlists de una categoría de mood o género usando sus parámetros codificados.",
+    response_description="Lista de playlists de la categoría",
     responses={
         200: {
             "description": "Playlists obtenidas exitosamente",
@@ -341,139 +355,49 @@ async def get_mood_categories(
                 "application/json": {
                     "example": {
                         "playlists": [
-                            {
-                                "playlistId": "PL...",
-                                "title": "Best Cumbia Songs",
-                                "thumbnails": [{"url": "https://..."}]
-                            }
-                        ],
-                        "method": "direct"
+                            {"title": "Cumbia Mix", "playlistId": "PL123"}
+                        ]
                     }
                 }
             }
         },
-        500: {"description": "Error al obtener playlists"}
+        404: {"description": "Categoría no encontrada (params inválidos)"},
+        500: {"description": "Error interno del servidor"}
     }
 )
 async def get_mood_playlists(
-    params: str = Path(..., description="Params obtenido de una categoría de mood/género", examples={"example1": {"value": "ggMPOg1uX3hRRFdlaEhHU09k"}}),
-    genre_name: Optional[str] = Query(
-        None, 
-        description="Nombre del género (fallback si get_mood_playlists falla)"
-    ),
-    use_search: bool = Query(
-        False, 
-        description="Forzar uso de búsqueda alternativa en lugar de get_mood_playlists"
-    ),
+    params: str = Path(..., description="Parámetros codificados de la categoría", examples={"example1": {"value": "ggMPOg1uX3hRRFdlaEhHU09k"}}),
     service: ExploreService = Depends(get_explore_service)
 ) -> Dict[str, Any]:
     """
-    Obtiene playlists de un mood o género usando `params`.
+    Obtiene playlists de una categoría de mood o género.
     
-    - Usa el `params` de una categoría obtenida en `/explore/moods`
-    - Cada playlist retornada tiene un `playlistId` para usar en `/api/v1/playlists/{playlistId}`
-    - Si `get_mood_playlists()` falla, se usa automáticamente búsqueda alternativa
-    - Puedes forzar búsqueda con `?use_search=true`
+    Usa los `params` de una categoría obtenida en `/explore/moods` o `/explore`.
+    Los params son valores codificados como `ggMPOg1uX1JOQWZFeDByc2Jm`.
     """
-    # Si se fuerza búsqueda o no hay params válido, usar búsqueda directamente
-    if use_search or not params:
-        if not genre_name:
-            genre_name = await service.get_genre_name_from_params(params) or "music"
-        
-        try:
-            results = await service.get_mood_playlists_alternative(genre_name)
-            return {
-                "playlists": results,
-                "method": "search",
-                "genre_name": genre_name
-            }
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error en búsqueda alternativa: {str(e)}"
-            )
+    from app.core.cache_redis import get_cached_value, set_cached_value
     
-    # Intentar método directo primero (puede fallar por cambios en YouTube Music)
+    cache_key = f"music:endpoint:explore:moods:{params}"
+    cached = await get_cached_value(cache_key)
+    if cached:
+        return cached
+    
     try:
         result = await service.get_mood_playlists(params)
-        
-        if not result:
-            # Si resultado vacío, intentar búsqueda alternativa
-            if not genre_name:
-                genre_name = await service.get_genre_name_from_params(params)
-            
-            if genre_name:
-                results = await service.get_mood_playlists_alternative(genre_name)
-                return {
-                    "playlists": results,
-                    "method": "alternative_search",
-                    "genre_name": genre_name,
-                    "message": "Método directo devolvió resultado vacío, se usó búsqueda alternativa"
-                }
-            
-            return {
-                "playlists": [],
-                "message": "No se encontraron playlists para este género/mood.",
-                "params": params
-            }
-        
-        return {
-            "playlists": result,
-            "method": "direct"
+        response = {
+            "playlists": result
         }
+        await set_cached_value(cache_key, response, ttl=3600)
+        return response
+    except YTMusicServiceException:
+        raise
     except Exception as e:
-        error_msg = str(e)
-        
-        # Si hay error de parsing, usar búsqueda alternativa automáticamente
-        if 'musicTwoRowItemRenderer' in error_msg or 'renderer' in error_msg.lower() or 'parsear' in error_msg.lower():
-            # Obtener nombre del género
-            if not genre_name:
-                genre_name = await service.get_genre_name_from_params(params)
-            
-            if genre_name:
-                try:
-                    results = await service.get_mood_playlists_alternative(genre_name)
-                    return {
-                        "playlists": results,
-                        "method": "alternative_search",
-                        "genre_name": genre_name,
-                        "message": "Se usó búsqueda alternativa debido a error en get_mood_playlists()",
-                        "params": params
-                    }
-                except Exception as alt_error:
-                    raise HTTPException(
-                        status_code=500,
-                        detail={
-                            "error": "Error en búsqueda alternativa",
-                            "original_error": str(e),
-                            "alternative_error": str(alt_error),
-                            "params": params,
-                            "genre_name": genre_name,
-                            "suggestion": f"Intenta: /api/v1/search/?q={genre_name}&filter=playlists"
-                        }
-                    )
-            
-            # Si no se pudo obtener nombre, sugerir usar búsqueda directa
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": "Error al parsear respuesta de YouTube Music",
-                    "message": "get_mood_playlists() falló y no se pudo obtener el nombre del género automáticamente.",
-                    "params": params,
-                    "solutions": [
-                        f"Usa búsqueda directa: /api/v1/explore/moods/{params}?use_search=true&genre_name=Cumbia",
-                        f"O directamente: /api/v1/search/?q=Cumbia&filter=playlists",
-                        "Actualiza ytmusicapi: pip install --upgrade ytmusicapi"
-                    ]
-                }
-            )
-        
-        # Otros errores
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get(
     "/charts",
+    response_model=Dict[str, Any],
     summary="Get music charts",
     description="Obtiene los charts de YouTube Music: top songs y trending. Opcionalmente incluye stream URLs.",
     response_description="Charts con top songs y trending",
@@ -572,19 +496,19 @@ async def get_charts(
             pass
         
         return response
+    except YTMusicServiceException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get(
     "/category/{category_params}",
+    response_model=Dict[str, Any],
     summary="Get category playlists (alias)",
     description="Alias para `/explore/moods/{params}`. Obtiene playlists de una categoría.",
     response_description="Lista de playlists de la categoría",
-    responses={
-        200: {"description": "Playlists obtenidas exitosamente"},
-        500: {"description": "Error al cargar categoría"}
-    }
+    responses={200: {"description": "Playlists obtenidas exitosamente"}, **COMMON_ERROR_RESPONSES}
 )
 async def get_category(
     category_params: str = Path(..., description="Params de la categoría", examples={"example1": {"value": "ggMPOg1uX3hRRFdlaEhHU09k"}}),
@@ -600,5 +524,7 @@ async def get_category(
         return {
             "playlists": result
         }
+    except YTMusicServiceException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error cargando categoría: {str(e)}")

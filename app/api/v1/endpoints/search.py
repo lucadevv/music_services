@@ -7,6 +7,7 @@ from app.core.ytmusic_client import get_ytmusic
 from app.core.validators import validate_search_query, validate_search_filter
 from app.services.search_service import SearchService
 from app.services.stream_service import StreamService
+from app.schemas.search import SearchResponse, SearchSuggestionsResponse
 from app.schemas.errors import COMMON_ERROR_RESPONSES
 
 router = APIRouter(tags=["search"])
@@ -24,6 +25,7 @@ def get_stream_service() -> StreamService:
 
 @router.get(
     "/",
+    response_model=Dict[str, Any],
     summary="Search music content",
     description="Busca contenido musical en YouTube Music: canciones, videos, álbumes, artistas y playlists.",
     response_description="Resultados de búsqueda",
@@ -141,6 +143,7 @@ async def search_music(
 
 @router.get(
     "/suggestions",
+    response_model=Dict[str, Any],
     summary="Get search suggestions",
     description="Obtiene sugerencias de búsqueda basadas en el query parcial.",
     response_description="Lista de sugerencias",
@@ -186,6 +189,7 @@ async def get_search_suggestions(
 
 @router.delete(
     "/suggestions",
+    response_model=Dict[str, Any],
     summary="Remove search suggestions",
     description="Elimina una sugerencia de búsqueda del historial.",
     response_description="Resultado de la eliminación",

@@ -7,11 +7,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.exceptions import RequestValidationError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+import yaml
 
 # Local imports
 from app.core.config import get_settings
@@ -101,7 +102,20 @@ app = FastAPI(
     - 🎧 **Streaming**: URLs directas de audio (best quality)
     - 📱 **Navegación**: Artistas, álbumes, canciones, letras
     - 🎙️ **Podcasts**: Canales, episodios y playlists
+    - 🔐 **OAuth Admin**: Configuración de autenticación desde panel admin
     - ⚡ **Rendimiento**: Caché inteligente, circuit breaker, rate limiting
+    
+    ## Autenticación OAuth (Admin)
+    
+    Los endpoints `/api/v1/auth/*` permiten configurar la autenticación OAuth
+    de YouTube Music desde un panel de administración. Todos requieren el header
+    `X-Admin-Key` configurado en `.env` como `ADMIN_SECRET_KEY`.
+    
+    **Flujo:**
+    1. `POST /api/v1/auth/credentials` — Guardar Client ID + Client Secret
+    2. `POST /api/v1/auth/oauth/start` — Iniciar flujo de autorización
+    3. `POST /api/v1/auth/oauth/poll` — Verificar autorización (polling cada 5s)
+    4. `GET /api/v1/auth/status` — Consultar estado de autenticación
     
     ## Optimizaciones
     
@@ -125,6 +139,7 @@ app = FastAPI(
     
     - **Swagger UI**: `/docs` - Interfaz interactiva
     - **ReDoc**: `/redoc` - Documentación alternativa
+    - **OpenAPI JSON**: `/openapi.json` - Spec descargable
     """,
     lifespan=lifespan,
     contact={
@@ -215,7 +230,7 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
                         "status": "online",
                         "service": "YouTube Music Service",
                         "version": "1.0.0",
-                        "auth": "Browser",
+                        "auth": "OAuth",
                         "docs": "/docs",
                         "api": "/api/v1"
                     }
@@ -258,3 +273,13 @@ async def root():
 async def health_check():
     """Health check endpoint para monitoreo."""
     return {"status": "healthy"}
+
+
+@app.get("/openapi.yaml", include_in_schema=False)
+async def openapi_yaml():
+    """Serve OpenAPI specification as YAML."""
+    openapi = app.openapi()
+    return Response(
+        content=yaml.dump(openapi, default_flow_style=False, allow_unicode=True),
+        media_type="application/x-yaml"
+    )

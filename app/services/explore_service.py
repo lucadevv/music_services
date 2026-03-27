@@ -5,6 +5,7 @@ import asyncio
 
 from app.services.base_service import BaseService
 from app.core.cache import cache_result
+from app.core.exceptions import ResourceNotFoundError, ExternalServiceError
 
 
 class ExploreService(BaseService):
@@ -61,14 +62,23 @@ class ExploreService(BaseService):
         except KeyError as e:
             error_msg = str(e)
             if 'musicTwoRowItemRenderer' in error_msg or 'renderer' in error_msg.lower():
-                raise Exception(
-                    f"Error al parsear la respuesta de YouTube Music. "
-                    f"Params usado: {params}. "
-                    f"Intenta actualizar ytmusicapi o usar otro método."
+                raise ExternalServiceError(
+                    message="Error al parsear la respuesta de YouTube Music.",
+                    details={"params": params, "hint": "Intenta actualizar ytmusicapi o usar otro método."}
                 )
             raise
         except Exception as e:
-            raise Exception(f"Error obteniendo playlists del mood/genre: {str(e)}. Params: {params}")
+            error_msg = str(e).lower()
+            is_not_found = any(kw in error_msg for kw in [
+                '404', 'not found', 'no encontrado', 'does not exist',
+                'requested entity was not found'
+            ])
+            if is_not_found:
+                raise ResourceNotFoundError(
+                    message=f"Categoría no encontrada para los parámetros proporcionados.",
+                    details={"params": params, "resource_type": "mood_category"}
+                )
+            raise self._handle_ytmusic_error(e, f"obtener playlists del mood/genre (params: {params})")
     
     def _find_genre_in_structure(self, data: Any, params: str) -> Optional[str]:
         """

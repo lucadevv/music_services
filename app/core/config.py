@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     OAUTH_JSON_PATH: str = "oauth.json"
     YTMUSIC_CLIENT_ID: Optional[str] = None
     YTMUSIC_CLIENT_SECRET: Optional[str] = None
+    ADMIN_SECRET_KEY: Optional[str] = None
     
     CORS_ORIGINS: str = "*"
     CORS_ALLOW_CREDENTIALS: bool = True

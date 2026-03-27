@@ -1,5 +1,5 @@
 """Upload endpoints."""
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
 from typing import Dict, Any
 
 router = APIRouter(tags=["uploads"])
@@ -7,23 +7,18 @@ router = APIRouter(tags=["uploads"])
 
 @router.get(
     "/",
+    response_model=Dict[str, Any],
     summary="Uploads information",
     description="Información sobre endpoints de uploads. Los endpoints de uploads requieren autenticación de usuario.",
     response_description="Información y endpoints públicos alternativos",
     responses={
-        200: {
-            "description": "Información obtenida exitosamente",
+        501: {
+            "description": "Endpoint no implementado",
             "content": {
                 "application/json": {
                     "example": {
-                        "message": "Upload endpoints require user authentication and are for managing personal uploaded content.",
-                        "public_endpoints": {
-                            "explore": "/api/v1/explore",
-                            "charts": "/api/v1/explore/charts",
-                            "moods": "/api/v1/explore/moods",
-                            "search": "/api/v1/search",
-                            "browse": "/api/v1/browse"
-                        }
+                        "error": "NOT_IMPLEMENTED",
+                        "message": "Upload endpoints are not implemented in this version. Use /api/v1/explore for public content."
                     }
                 }
             }
@@ -37,3 +32,10 @@ async def uploads_info() -> Dict[str, Any]:
     Los endpoints de uploads requieren autenticación de usuario para gestionar contenido personal subido.
     Para contenido público, usa los endpoints de `/explore`, `/search` y `/browse`.
     """
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail={
+            "error": "NOT_IMPLEMENTED",
+            "message": "Upload endpoints are not implemented in this version. Use /api/v1/explore for public content."
+        }
+    )

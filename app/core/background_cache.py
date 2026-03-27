@@ -41,9 +41,9 @@ class CacheManager:
         self.stream_service = StreamService()
         self.explore_service = None
         self._running = False
-        self._refresh_interval = 1800  # 30 minutos
-        self._refresh_threshold = 3600  # 1 hora antes de expirar
-        self._max_refresh_per_cycle = 20  # Max URLs a refrescar por ciclo
+        self._refresh_interval = 600  # 10 minutos
+        self._refresh_threshold = 1800  # 30 minutos antes de expirar
+        self._max_refresh_per_cycle = 50  # Max URLs a refrescar por ciclo
         self._processed_video_ids: Set[str] = set()  # Evitar duplicados en ciclo
         
         # Track metrics

@@ -1,17 +1,16 @@
 """Stats and monitoring endpoints."""
 from fastapi import APIRouter
 from typing import Dict, Any
-from app.core.cache import get_cache_stats
-from app.core.config import get_settings
-from app.core.circuit_breaker import youtube_stream_circuit
-from app.core.background_cache import cache_manager
+import logging
 
 router = APIRouter(tags=["stats"])
-settings = get_settings()
+
+logger = logging.getLogger(__name__)
 
 
 @router.get(
     "/stats",
+    response_model=Dict[str, Any],
     summary="Get service statistics",
     description="Obtiene estadísticas del servicio: rate limiting, caché, circuit breaker y rendimiento.",
     response_description="Estadísticas del servicio",
@@ -54,10 +53,37 @@ settings = get_settings()
 )
 async def get_stats() -> Dict[str, Any]:
     """Obtiene estadísticas completas del servicio."""
-    cache_stats = get_cache_stats()
-    circuit_status = youtube_stream_circuit.get_status()
-    cache_metrics = cache_manager.get_metrics()
-    
+    from app.core.config import get_settings
+    from app.core.cache import get_cache_stats
+    from app.core.circuit_breaker import youtube_stream_circuit
+    from app.core.background_cache import cache_manager
+
+    try:
+        settings = get_settings()
+    except Exception:
+        return {
+            "service": "YouTube Music Service",
+            "error": "Configuration not available"
+        }
+
+    try:
+        cache_stats = await get_cache_stats()
+    except Exception as e:
+        logger.warning(f"Failed to get cache stats: {e}")
+        cache_stats = {"enabled": False, "error": str(e)}
+
+    try:
+        circuit_status = youtube_stream_circuit.get_status()
+    except Exception as e:
+        logger.warning(f"Failed to get circuit breaker status: {e}")
+        circuit_status = {"state": "unknown", "error": str(e)}
+
+    try:
+        cache_metrics = cache_manager.get_metrics()
+    except Exception as e:
+        logger.warning(f"Failed to get cache manager metrics: {e}")
+        cache_metrics = {"error": str(e)}
+
     return {
         "service": settings.PROJECT_NAME,
         "version": settings.VERSION,

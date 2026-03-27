@@ -84,7 +84,8 @@ class TestGetMoodPlaylists:
         mock_ytmusic.get_mood_playlists.side_effect = Exception("Generic error")
         service = ExploreService(mock_ytmusic)
         
-        with pytest.raises(Exception, match="Error obteniendo playlists"):
+        with pytest.raises(Exception, match="obtener playlists del mood"):
+
             await service.get_mood_playlists("params123")
 
 

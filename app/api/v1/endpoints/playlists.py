@@ -4,6 +4,9 @@ from typing import Optional, Dict, Any
 from ytmusicapi import YTMusic
 
 from app.core.ytmusic_client import get_ytmusic
+from app.core.exceptions import YTMusicServiceException
+from app.schemas.playlist import PlaylistResponse
+from app.schemas.errors import COMMON_ERROR_RESPONSES
 from app.services.playlist_service import PlaylistService
 from app.services.stream_service import StreamService
 
@@ -22,6 +25,7 @@ def get_stream_service() -> StreamService:
 
 @router.get(
     "/{playlist_id}",
+    response_model=Dict[str, Any],
     summary="Get playlist",
     description="Obtiene información completa de una playlist pública incluyendo todas sus canciones.",
     response_description="Información de la playlist con tracks",
@@ -127,9 +131,13 @@ async def get_playlist(
         # Cache por 10 min
         try:
             await set_cached_value(cache_key, playlist_data, ttl=600)
+        except YTMusicServiceException:
+            raise
         except Exception:
             pass
         
         return playlist_data
+    except YTMusicServiceException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

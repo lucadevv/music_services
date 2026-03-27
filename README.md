@@ -45,6 +45,7 @@ HTTP Request
 | `/playlists` | Playlists públicas |
 | `/podcasts` | Canales, episodios |
 | `/stats` | Monitoreo del servicio |
+| `/auth` | Administración de OAuth (credenciales, flujo de autorización, estado) |
 
 ## Requisitos Previos
 
@@ -91,6 +92,14 @@ YTMUSIC_CLIENT_SECRET=tu_client_secret
 ```bash
 python scripts/generate_oauth.py
 ```
+
+## API de Autenticación OAuth
+
+El servicio incluye endpoints de administración para configurar la autenticación de YouTube Music desde un panel admin. Consulta la [documentación completa](./README_AUTH_API.md) para detalles sobre los endpoints `/api/v1/auth/*` (guardar credenciales, iniciar flujo OAuth, verificar autorización, etc.).
+
+La especificación OpenAPI está disponible en:
+- JSON: `/openapi.json`
+- YAML: `/openapi.yaml`
 
 ## Levantar el servicio
 

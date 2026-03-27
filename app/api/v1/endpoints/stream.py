@@ -1,4 +1,6 @@
 """Stream endpoints."""
+import logging
+
 from fastapi import APIRouter, Depends, Path, Query, HTTPException, Header, Response
 from fastapi.responses import StreamingResponse
 from typing import Dict, Any, List, Optional
@@ -17,6 +19,7 @@ from app.core.cache_redis import (
 from app.schemas.errors import COMMON_ERROR_RESPONSES
 
 router = APIRouter(tags=["stream"])
+logger = logging.getLogger(__name__)
 
 
 def get_stream_service() -> StreamService:
@@ -85,6 +88,22 @@ async def proxy_stream_audio(
         async def stream_generator():
             async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
                 async with client.stream("GET", audio_url, headers=headers, follow_redirects=True) as response:
+                    # 403 = stream URL expired → clear cache and retry with fresh URL
+                    if response.status_code == 403:
+                        logger.info(f"🔄 Stream URL expired for {video_id}, fetching fresh...")
+                        fresh_data = await service.get_stream_url(video_id, bypass_cache=True)
+                        fresh_url = fresh_data.get("streamUrl")
+                        if not fresh_url:
+                            raise HTTPException(status_code=502, detail="No se pudo obtener URL fresca de audio")
+                        # Retry with fresh URL
+                        async with client.stream("GET", fresh_url, headers=headers, follow_redirects=True) as retry_response:
+                            if retry_response.status_code != 200:
+                                raise HTTPException(status_code=502, detail=f"Error del servidor de audio: {retry_response.status_code}")
+                            content_type = retry_response.headers.get("content-type", "audio/mpeg")
+                            async for chunk in retry_response.aiter_bytes(chunk_size=8192):
+                                yield chunk
+                        return
+                    
                     if response.status_code != 200:
                         raise HTTPException(
                             status_code=response.status_code,

@@ -6,11 +6,12 @@ from pydantic import BaseModel, Field
 class StreamUrlResponse(BaseModel):
     """Response for stream URL endpoint."""
     
-    url: str = Field(..., description="Direct audio stream URL")
+    streamUrl: str = Field(..., description="Direct audio stream URL")
     title: Optional[str] = Field(None, description="Song title")
     artist: Optional[str] = Field(None, description="Artist name")
     duration: Optional[int] = Field(None, description="Duration in seconds")
     thumbnail: Optional[str] = Field(None, description="Best quality thumbnail URL")
+    from_cache: Optional[bool] = Field(None, description="Whether the URL was served from cache")
 
 
 class StreamEnrichedItem(BaseModel):
