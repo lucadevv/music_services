@@ -62,7 +62,7 @@ class AuthenticationError(YTMusicServiceException):
     """Error de autenticación con YouTube Music.
     
     Raised when:
-    - browser.json is invalid or expired
+    - OAuth credentials are invalid or expired
     - Credentials are malformed
     - Session has expired
     - YouTube returns authentication errors

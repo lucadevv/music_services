@@ -24,7 +24,9 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
-      - BROWSER_JSON_PATH=/app/browser.json
+      - OAUTH_JSON_PATH=/app/oauth.json
+      - YTMUSIC_CLIENT_ID=${YTMUSIC_CLIENT_ID}
+      - YTMUSIC_CLIENT_SECRET=${YTMUSIC_CLIENT_SECRET}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
       - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}
@@ -41,7 +43,7 @@ services:
       - HTTP_TIMEOUT=${HTTP_TIMEOUT:-30}
       - MAX_WORKERS=${MAX_WORKERS:-4}
     volumes:
-      - ./browser.json:/app/browser.json:ro
+      - ./oauth.json:/app/oauth.json:ro
     depends_on:
       ytmusic_redis:
         condition: service_healthy
@@ -77,7 +79,9 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
-      - BROWSER_JSON_PATH=/app/browser.json
+      - OAUTH_JSON_PATH=/app/oauth.json
+      - YTMUSIC_CLIENT_ID=${YTMUSIC_CLIENT_ID}
+      - YTMUSIC_CLIENT_SECRET=${YTMUSIC_CLIENT_SECRET}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-false}
       - CACHE_ENABLED=${CACHE_ENABLED:-true}

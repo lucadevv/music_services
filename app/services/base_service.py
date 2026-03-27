@@ -74,7 +74,7 @@ class BaseService:
             f"YTMusic error during '{operation}': {error_type} - {error_msg}"
         )
         
-        # Authentication errors - usually means browser.json is invalid or expired
+        # Authentication errors - usually means OAuth credentials are invalid or expired
         # Patterns: JSON parsing errors, empty responses, auth failures
         if any(pattern in error_msg for pattern in [
             "Expecting value", "JSONDecodeError", "line 1 column 1", "Invalid JSON"

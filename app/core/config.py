@@ -12,7 +12,6 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "YouTube Music Service"
     VERSION: str = "1.0.0"
     
-    BROWSER_JSON_PATH: str = "browser.json"
     OAUTH_JSON_PATH: str = "oauth.json"
     YTMUSIC_CLIENT_ID: Optional[str] = None
     YTMUSIC_CLIENT_SECRET: Optional[str] = None

@@ -35,7 +35,7 @@ def mock_settings() -> Settings:
         API_V1_STR="/api/v1",
         PROJECT_NAME="Test YouTube Music Service",
         VERSION="1.0.0-test",
-        BROWSER_JSON_PATH="browser.json",
+        OAUTH_JSON_PATH="oauth.json",
         CORS_ORIGINS="*",
         CORS_ALLOW_CREDENTIALS=True,
         CORS_ALLOW_METHODS="*",
