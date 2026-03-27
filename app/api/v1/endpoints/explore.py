@@ -98,6 +98,23 @@ async def explore_music(
         False, 
         description="Incluir stream URLs y mejores thumbnails para charts"
     ),
+    limit: int = Query(
+        10, 
+        ge=1, 
+        le=50, 
+        description="Número máximo de canciones en charts"
+    ),
+    start_index: int = Query(
+        0, 
+        ge=0, 
+        description="Índice inicial para paginación de charts"
+    ),
+    prefetch_count: int = Query(
+        10, 
+        ge=-1, 
+        le=50, 
+        description="Número de URLs a obtener en paralelo (0=none, -1=todas)"
+    ),
     service: ExploreService = Depends(get_explore_service)
 ) -> Dict[str, Any]:
     """
@@ -105,7 +122,12 @@ async def explore_music(
     
     - **moods_genres**: Categorías de moods/géneros con sus `params` para obtener playlists
     - **home**: Contenido de la página principal de YouTube Music
-    - **charts**: Top songs y trending con `stream_url` y `thumbnail` si `include_stream_urls=true`
+    - **charts**: Top songs y trending con paginación y stream_url si include_stream_urls=true
+    
+    **Paginación de charts:**
+    - `limit`: Número de canciones a retornar (default: 10, max: 50)
+    - `start_index`: Índice inicial para paginación
+    - `prefetch_count`: Cuántos tracks enriquecer con stream URLs (default: 10, -1=todos)
     
     Cada categoría en `moods_genres` tiene un campo `params` que puedes usar en `/explore/moods/{params}`.
     """
@@ -119,7 +141,7 @@ async def explore_music(
     logger = logging.getLogger("explore")
     settings = get_settings()
     
-    cache_key = f"music:endpoint:explore:include_stream_urls={include_stream_urls}"
+    cache_key = f"music:endpoint:explore:{include_stream_urls}:{limit}:{start_index}:{prefetch_count}"
     
     cached = await get_cached_value(cache_key)
     if cached:
@@ -145,21 +167,53 @@ async def explore_music(
         if not trending_data:
             trending_data = top_songs_data
         
+        # Initialize stats for response
+        top_songs_with_url = 0
+        trending_with_url = 0
+        
+        # Apply pagination BEFORE enrichment (same pattern as playlists)
+        if start_index > 0 and start_index < len(top_songs_data):
+            top_songs_data = top_songs_data[start_index:]
+        if limit > 0 and limit < len(top_songs_data):
+            top_songs_data = top_songs_data[:limit]
+        
+        if start_index > 0 and start_index < len(trending_data):
+            trending_data = trending_data[start_index:]
+        if limit > 0 and limit < len(trending_data):
+            trending_data = trending_data[:limit]
+        
+        # Enrich only prefetch_count items with stream URLs
         if include_stream_urls:
             from app.services.stream_service import StreamService
             stream_service = StreamService()
             
             if top_songs_data:
-                top_songs_data = await stream_service.enrich_items_with_streams(
-                    top_songs_data,
-                    include_stream_urls=True
-                )
+                top_to_enrich = top_songs_data if prefetch_count == -1 else top_songs_data[:prefetch_count]
+                top_remaining = [] if prefetch_count == -1 else top_songs_data[prefetch_count:]
+                
+                if top_to_enrich:
+                    top_songs_data = await stream_service.enrich_items_with_streams(
+                        top_to_enrich,
+                        include_stream_urls=True
+                    )
+                    if top_remaining:
+                        top_songs_data.extend(top_remaining)
             
             if trending_data:
-                trending_data = await stream_service.enrich_items_with_streams(
-                    trending_data, 
-                    include_stream_urls=True
-                )
+                trending_to_enrich = trending_data if prefetch_count == -1 else trending_data[:prefetch_count]
+                trending_remaining = [] if prefetch_count == -1 else trending_data[prefetch_count:]
+                
+                if trending_to_enrich:
+                    trending_data = await stream_service.enrich_items_with_streams(
+                        trending_to_enrich, 
+                        include_stream_urls=True
+                    )
+                    if trending_remaining:
+                        trending_data.extend(trending_remaining)
+        
+        # Calculate stream URL stats for response
+        top_songs_with_url = sum(1 for t in top_songs_data if t.get('stream_url'))
+        trending_with_url = sum(1 for t in trending_data if t.get('stream_url'))
     except Exception as e:
         logger.warning(f"Failed to get charts (non-critical): {e}")
     
@@ -187,11 +241,18 @@ async def explore_music(
         "home": home,
         "charts": {
             "top_songs": top_songs_data,
-            "trending": trending_data
+            "trending": trending_data,
+            "pagination": {
+                "limit": limit,
+                "start_index": start_index,
+                "prefetch_count": prefetch_count
+            },
+            "stream_urls_prefetched": top_songs_with_url,
+            "stream_urls_total": len(top_songs_data)
         },
         "info": {
             "usage": "Cada categoría en 'moods_genres' tiene un campo 'params'. Usa ese 'params' en /explore/moods/{params} para obtener las playlists de esa categoría.",
-            "charts_usage": "Las canciones en 'charts' incluyen 'stream_url' y 'thumbnail' (mejor calidad) si include_stream_urls=true."
+            "charts_usage": "Las canciones en 'charts' incluyen 'stream_url' y 'thumbnail' (mejor calidad) si include_stream_urls=true. Usa limit/start_index para paginación."
         }
     }
     

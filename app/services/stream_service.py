@@ -472,11 +472,13 @@ class StreamService(BaseService):
     async def enrich_items_with_streams(
         self, 
         items: List[Dict[str, Any]], 
-        include_stream_urls: bool = True
+        include_stream_urls: bool = True,
+        bypass_cache: bool = False
     ) -> List[Dict[str, Any]]:
         """
         Enrich multiple items with stream URLs and best thumbnails.
         OPTIMIZED: Uses Redis MGET for batch cache checks.
+        If bypass_cache=True, ignores cache and fetches fresh URLs from YouTube.
         """
         if not items:
             return []
@@ -503,21 +505,27 @@ class StreamService(BaseService):
         # Build cache keys
         cache_keys = [self._get_stream_url_cache_key(vid) for vid in video_ids]
         
-        # FASE 1: Batch check cache with ONE Redis MGET call
-        cached_values = await get_cached_values_batch_with_ttl(cache_keys, self.STREAM_URL_TTL)
-        
-        cached_urls = {}
-        uncached_video_ids = []
-        
-        for vid, cache_key in zip(video_ids, cache_keys):
-            cached_value = cached_values.get(cache_key)
-            if cached_value:
-                cached_urls[vid] = cached_value
-                self.logger.debug(f"Cache HIT: {vid}")
-            else:
-                uncached_video_ids.append(vid)
-        
-        self.logger.info(f"Cache stats: {len(cached_urls)} cached, {len(uncached_video_ids)} need fetch")
+        # Si bypass_cache=True, saltamos la verificación de cache
+        if bypass_cache:
+            uncached_video_ids = video_ids
+            cached_urls = {}
+            self.logger.info(f"bypass_cache=True: Fetching fresh URLs for {len(video_ids)} videos from YouTube")
+        else:
+            # FASE 1: Batch check cache with ONE Redis MGET call
+            cached_values = await get_cached_values_batch_with_ttl(cache_keys, self.STREAM_URL_TTL)
+            
+            cached_urls = {}
+            uncached_video_ids = []
+            
+            for vid, cache_key in zip(video_ids, cache_keys):
+                cached_value = cached_values.get(cache_key)
+                if cached_value:
+                    cached_urls[vid] = cached_value
+                    self.logger.debug(f"Cache HIT: {vid}")
+                else:
+                    uncached_video_ids.append(vid)
+            
+            self.logger.info(f"Cache stats: {len(cached_urls)} cached, {len(uncached_video_ids)} need fetch")
         
         # FASE 2: Fetch uncached URLs in parallel
         if uncached_video_ids:

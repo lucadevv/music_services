@@ -115,13 +115,13 @@ async def proxy_stream_audio(
 
 
 # ============================================
-# BATCH ENDPOINT - MUST BE BEFORE /{video_id}
+# BATCH ENDPOINT - Optimizado con MGET como playlists
 # ============================================
 
 @router.get(
     "/batch",
     summary="Get multiple stream URLs",
-    description="Obtiene URLs de stream para múltiples videos a la vez. Optimizado para Play All y listas.",
+    description="Obtiene URLs de stream para múltiples videos. Usa MGET de Redis para optimizar cache como playlists.",
     response_description="Lista de URLs de stream con metadatos",
     responses={
         200: {
@@ -132,76 +132,71 @@ async def proxy_stream_audio(
     }
 )
 async def get_batch_stream_urls(
-    video_ids: str = Query(..., alias="ids", description="Lista de IDs separada por comas (máximo 20)"),
+    video_ids: str = Query(..., alias="ids", description="Lista de IDs separada por comas (máximo 50)"),
+    bypass_cache: bool = Query(False, description="Si true, ignora cache y obtiene URLs frescas de YouTube"),
     service: StreamService = Depends(get_stream_service)
 ) -> Dict[str, Any]:
     """
     Obtiene URLs de stream para múltiples videos a la vez.
-    Optimizado con llamadas paralelas para mejor rendimiento.
+    Usa el mismo patrón de enriquecimiento que playlists:
+    - MGET de Redis para verificar cache en una sola llamada
+    - Solo fetch de YouTube los que no están en cache
+    - parallel para mejor rendimiento
     
     **Ejemplo:**
     `/stream/batch?ids=dQw4w9WgXcQ,9bZkp7q19f0,kJQP7kiw5Fk`
-    """
-    import asyncio
     
-    # Parse video IDs from comma-separated string
+    **Con bypass de cache ( URLs frescas):**
+    `/stream/batch?ids=dQw4w9WgXcQ,9bZkp7q19f0&bypass_cache=true`
+    """
     video_id_list = [vid.strip() for vid in video_ids.split(',') if vid.strip()]
     
-    # Validar lista
     if not video_id_list:
         raise HTTPException(status_code=400, detail="Lista de videos vacía")
     
-    if len(video_id_list) > 20:
-        raise HTTPException(status_code=400, detail="Máximo 20 videos por request")
+    if len(video_id_list) > 50:
+        raise HTTPException(status_code=400, detail="Máximo 50 videos por request")
     
-    # Eliminar duplicados
-    video_id_list = list(dict.fromkeys(video_id_list))
+    items = [{"videoId": vid} for vid in video_id_list]
+    
+    enriched_items = await service.enrich_items_with_streams(
+        items, 
+        include_stream_urls=True,
+        bypass_cache=bypass_cache
+    )
     
     results = []
     cached_count = 0
+    fetched_count = 0
     
-    # Función helper para obtener stream de un video
-    async def get_single_stream(video_id: str) -> Dict[str, Any]:
-        try:
-            validate_video_id(video_id)
-            stream_data = await service.get_stream_url(video_id, bypass_cache=False)
-            from_cache = stream_data.get("from_cache", False)
-            return {
-                "videoId": video_id,
-                "title": stream_data.get("title"),
-                "artist": stream_data.get("artist"),
-                "duration": stream_data.get("duration"),
-                "thumbnail": stream_data.get("thumbnail"),
-                "streamUrl": stream_data.get("streamUrl"),
-                "stream_url": stream_data.get("stream_url"),
-                "cached": from_cache,
-                "error": None
-            }
-        except Exception as e:
-            return {
-                "videoId": video_id,
-                "error": str(e),
-                "streamUrl": None,
-                "stream_url": None,
-                "cached": False
-            }
-    
-    # Ejecutar todas las llamadas en paralelo
-    stream_tasks = [get_single_stream(vid) for vid in video_id_list]
-    stream_results = await asyncio.gather(*stream_tasks)
-    
-    # Procesar resultados
-    for result in stream_results:
-        results.append(result)
-        if result.get("cached"):
+    for item in enriched_items:
+        video_id = item.get("videoId")
+        stream_url = item.get("stream_url")
+        cached = stream_url is not None
+        
+        if cached:
             cached_count += 1
+        else:
+            fetched_count += 1
+        
+        results.append({
+            "videoId": video_id,
+            "url": stream_url,
+            "title": item.get("title"),
+            "artist": item.get("artist"),
+            "duration": item.get("duration"),
+            "thumbnail": item.get("thumbnail"),
+            "cached": cached,
+            "error": None if stream_url else "No se pudo obtener URL"
+        })
     
     return {
         "results": results,
         "summary": {
             "total": len(results),
             "cached": cached_count,
-            "failed": len(results) - cached_count
+            "fetched": fetched_count,
+            "failed": len(results) - cached_count - fetched_count
         }
     }
 

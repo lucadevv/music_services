@@ -2,12 +2,32 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import Optional, Dict, Any
 from ytmusicapi import YTMusic
+import time
+import asyncio
 
 from app.core.ytmusic_client import get_ytmusic
 from app.services.watch_service import WatchService
 from app.services.stream_service import StreamService
 
 router = APIRouter(tags=["watch"])
+
+# In-memory rate limiting para evitar llamadas duplicadas rápidas
+# Key: video_id or playlist_id, Value: (timestamp, result)
+_recent_requests: Dict[str, tuple] = {}
+_request_lock = asyncio.Lock()
+_REQUEST_TTL = 5  # Cache en memoria por 5 segundos para evitar llamadas duplicadas
+
+
+async def _cleanup_old_requests():
+    """Limpia entradas de cache antiguas."""
+    current_time = time.time()
+    async with _request_lock:
+        keys_to_delete = [
+            key for key, (ts, _) in _recent_requests.items()
+            if current_time - ts > _REQUEST_TTL
+        ]
+        for key in keys_to_delete:
+            del _recent_requests[key]
 
 
 def get_watch_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> WatchService:
@@ -87,6 +107,20 @@ async def get_watch_playlist(
             detail="Se requiere 'video_id' o 'playlist_id'"
         )
     
+    # Deduplicación en memoria para evitar llamadas duplicadas rápidas
+    request_key = f"{video_id or playlist_id}:{start_index}:{limit}"
+    current_time = time.time()
+    
+    # Limpiar cache antiguos ocasionalmente
+    if len(_recent_requests) > 100:
+        await _cleanup_old_requests()
+    
+    async with _request_lock:
+        if request_key in _recent_requests:
+            cached_time, cached_result = _recent_requests[request_key]
+            if current_time - cached_time < _REQUEST_TTL:
+                return cached_result
+    
     from app.core.cache_redis import get_cached_value, set_cached_value
     
     cache_key = f"music:endpoint:watch:{video_id or ''}:{playlist_id or ''}:{limit}:{start_index}:{radio}:{shuffle}:{include_stream_urls}:{prefetch_count}"
@@ -154,6 +188,10 @@ async def get_watch_playlist(
             await set_cached_value(cache_key, playlist_data, ttl=300)
         except Exception:
             pass
+        
+        # Guardar en cache en memoria para deduplicación
+        async with _request_lock:
+            _recent_requests[request_key] = (current_time, playlist_data)
         
         return playlist_data
     except Exception as e:
