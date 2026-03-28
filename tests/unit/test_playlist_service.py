@@ -74,7 +74,8 @@ class TestGetPlaylist:
         await service.get_playlist("PL123", limit=50)
         
         call_args = mock_ytmusic.get_playlist.call_args
-        assert call_args[0][1] == 50  # limit is second positional arg
+        # ytmusicapi uses keyword args: limit=limit
+        assert call_args.kwargs.get("limit") == 50
 
     async def test_get_playlist_with_related(self, mock_ytmusic, sample_playlist):
         """Test get_playlist with related parameter."""
@@ -84,7 +85,8 @@ class TestGetPlaylist:
         await service.get_playlist("PL123", related=True)
         
         call_args = mock_ytmusic.get_playlist.call_args
-        assert call_args[0][2] == True  # related is third positional arg
+        # ytmusicapi uses keyword args: related=related
+        assert call_args.kwargs.get("related") == True
 
     async def test_get_playlist_with_suggestions_limit(self, mock_ytmusic, sample_playlist):
         """Test get_playlist with suggestions_limit parameter."""
@@ -94,7 +96,7 @@ class TestGetPlaylist:
         await service.get_playlist("PL123", suggestions_limit=10)
         
         call_args = mock_ytmusic.get_playlist.call_args
-        assert call_args[0][3] == 10  # suggestions_limit is fourth positional arg
+        assert call_args.kwargs.get("suggestions_limit") == 10
 
     async def test_get_playlist_not_found(self, mock_ytmusic):
         """Test get_playlist raises error when playlist not found."""
@@ -160,7 +162,7 @@ class TestPlaylistServiceEdgeCases:
         await service.get_playlist("PL123", limit=1000)
         
         call_args = mock_ytmusic.get_playlist.call_args
-        assert call_args[0][1] == 1000
+        assert call_args.kwargs.get("limit") == 1000
 
     async def test_get_playlist_special_characters_in_id(self, mock_ytmusic, sample_playlist):
         """Test get_playlist with special characters in ID."""

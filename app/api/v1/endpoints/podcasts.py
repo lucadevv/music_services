@@ -54,16 +54,8 @@ async def get_channel(
     service: PodcastService = Depends(get_podcast_service)
 ) -> Dict[str, Any]:
     """Obtiene información de un canal de podcast."""
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:podcast:channel:{channel_id}:{limit}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         result = await service.get_channel(channel_id, limit)
-        await set_cached_value(cache_key, result, ttl=3600)
         return result
     except YTMusicServiceException:
         raise
@@ -114,16 +106,8 @@ async def get_channel_episodes(
     service: PodcastService = Depends(get_podcast_service)
 ) -> Dict[str, Any]:
     """Obtiene los episodios de un canal de podcast."""
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:podcast:channel:{channel_id}:episodes:{limit}:{params or 'default'}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         result = await service.get_channel_episodes(channel_id, limit, params)
-        await set_cached_value(cache_key, result, ttl=1800)
         return result
     except YTMusicServiceException:
         raise
@@ -177,16 +161,8 @@ async def get_podcast(
     service: PodcastService = Depends(get_podcast_service)
 ) -> Dict[str, Any]:
     """Obtiene información de un podcast específico."""
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:podcast:{browse_id}:{limit}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         result = await service.get_podcast(browse_id, limit)
-        await set_cached_value(cache_key, result, ttl=3600)
         return result
     except YTMusicServiceException:
         raise
@@ -235,16 +211,8 @@ async def get_episode(
     service: PodcastService = Depends(get_podcast_service)
 ) -> Dict[str, Any]:
     """Obtiene información de un episodio específico de podcast."""
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:podcast:episode:{browse_id}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         result = await service.get_episode(browse_id)
-        await set_cached_value(cache_key, result, ttl=3600)
         return result
     except YTMusicServiceException:
         raise
@@ -298,16 +266,8 @@ async def get_episodes_playlist(
     service: PodcastService = Depends(get_podcast_service)
 ) -> Dict[str, Any]:
     """Obtiene la playlist de episodios de un podcast."""
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:podcast:{browse_id}:playlist:{limit}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         result = await service.get_episodes_playlist(browse_id, limit)
-        await set_cached_value(cache_key, result, ttl=1800)
         return result
     except YTMusicServiceException:
         raise

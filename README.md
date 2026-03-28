@@ -12,7 +12,7 @@ Diseñada para ser consumida por un backend NestJS dentro de un monorepo.
 | Lenguaje | Python 3.11 |
 | YouTube Music | ytmusicapi |
 | Streaming | yt-dlp |
-| Cache | Redis 7 |
+| Cache | Redis 7 (service-layer only) |
 | Rate Limiting | slowapi |
 | Validación | Pydantic v2 |
 | Containerización | Docker + Compose |
@@ -26,14 +26,28 @@ HTTP Request
     ↓
 [API Layer] → app/api/v1/endpoints/*.py (~35 endpoints)
     ↓
-[Service Layer] → app/services/*.py (lógica de negocio)
+[Service Layer] → app/services/*.py (lógica de negocio + @cache_result para metadata)
     ↓
-[Core Layer] → Redis cache, Circuit Breaker, Exceptions
+[Core Layer] → Redis cache (service-level only), Circuit Breaker, Exceptions
     ↓
-[External] → ytmusicapi (metadata) + yt-dlp (stream URLs)
+[External] → ytmusicapi (metadata) + yt-dlp (stream URLs, runtime)
 ```
 
+### Cache Architecture
+
+El sistema usa un **two-tier caching strategy**:
+
+| Layer | Qué se cachea | TTL | Key Pattern |
+|-------|---------------|-----|-------------|
+| **Service** (`@cache_result`) | Metadata (canciones, álbumes, playlists, etc.) | 1-24h | `music:{method}:{hash}` |
+| **Stream** (`StreamService`) | Stream URLs (audio directo) | 1h | `music:stream:url:{video_id}` |
+
+**Regla de oro**: Las stream URLs **NUNCA** se cachean dentro de respuestas de endpoint. Siempre se inyectan en runtime via `stream_service.enrich_items_with_streams()`.
+
+Esto elimina los 403 que ocurrían cuando YouTube expira las URLs (~6h) y el endpoint cache las servía stale.
+
 ## Endpoints (~35)
+
 
 | Dominio | Endpoints |
 |---------|-----------|
