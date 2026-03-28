@@ -24,7 +24,7 @@ HTTP Request
     ↓
 [Middleware] → CORS, GZip, Rate Limiting (slowapi+Redis)
     ↓
-[API Layer] → app/api/v1/endpoints/*.py (~35 endpoints)
+[API Layer] → app/api/v1/endpoints/*.py (33 endpoints)
     ↓
 [Service Layer] → app/services/*.py (lógica de negocio + @cache_result para metadata)
     ↓
@@ -32,6 +32,8 @@ HTTP Request
     ↓
 [External] → ytmusicapi (metadata) + yt-dlp (stream URLs, runtime)
 ```
+
+**Nota**: `/explore/category/{params}` está deprecado y es un alias de `/explore/moods/{params}`.
 
 ### Cache Architecture
 
@@ -46,20 +48,89 @@ El sistema usa un **two-tier caching strategy**:
 
 Esto elimina los 403 que ocurrían cuando YouTube expira las URLs (~6h) y el endpoint cache las servía stale.
 
-## Endpoints (~35)
+## Endpoints (33)
 
+### Search
 
-| Dominio | Endpoints |
-|---------|-----------|
-| `/search` | Búsqueda, sugerencias |
-| `/browse` | Home, artista, álbum, canción, lyrics, related |
-| `/explore` | Charts, moods/genres |
-| `/stream` | URL streaming, proxy de audio, batch, cache |
-| `/watch` | Playlist radio/shuffle |
-| `/playlists` | Playlists públicas |
-| `/podcasts` | Canales, episodios |
-| `/stats` | Monitoreo del servicio |
-| `/auth` | Administración de OAuth (credenciales, flujo de autorización, estado) |
+| Method | Route | Summary |
+|--------|-------|---------|
+| GET | `/search/` | Search music content |
+| GET | `/search/suggestions` | Get search suggestions |
+| DELETE | `/search/suggestions` | Remove search suggestion |
+
+### Browse
+
+| Method | Route | Summary |
+|--------|-------|---------|
+| GET | `/browse/home` | Get home page |
+| GET | `/browse/artist/{channel_id}/albums` | Get artist albums |
+| GET | `/browse/album/{album_id}` | Get album info |
+| GET | `/browse/album/{album_id}/browse-id` | Get album browse ID |
+| GET | `/browse/song/{video_id}` | Get song metadata |
+| GET | `/browse/song/{video_id}/related` | Get related songs |
+| GET | `/browse/lyrics/{browse_id}` | Get lyrics |
+| GET | `/browse/lyrics-by-video/{video_id}` | Get lyrics by video |
+
+### Explore
+
+| Method | Route | Summary |
+|--------|-------|---------|
+| GET | `/explore/` | Get explore content |
+| GET | `/explore/moods` | Get mood categories |
+| GET | `/explore/moods/{params}` | Get mood playlists |
+| GET | `/explore/charts` | Get charts |
+| GET | `/explore/category/{params}` | ⚠️ DEPRECATED — alias for `/moods/{params}` |
+
+### Stream
+
+| Method | Route | Summary |
+|--------|-------|---------|
+| GET | `/stream/{video_id}` | Get audio stream URL |
+| GET | `/stream/proxy/{video_id}` | Proxy audio stream |
+| GET | `/stream/batch` | Batch stream URLs |
+| GET | `/stream/cache/stats` | Cache statistics |
+| DELETE | `/stream/cache` | Clear stream cache |
+| GET | `/stream/cache/info/{video_id}` | Check cached URL |
+| DELETE | `/stream/cache/{video_id}` | Delete cached URL |
+| GET | `/stream/status/{video_id}` | Check if URL cached |
+
+### Watch
+
+| Method | Route | Summary |
+|--------|-------|---------|
+| GET | `/watch/` | Watch playlist (radio) |
+
+### Playlists
+
+| Method | Route | Summary |
+|--------|-------|---------|
+| GET | `/playlists/{playlist_id}` | Get playlist |
+
+### Podcasts
+
+| Method | Route | Summary |
+|--------|-------|---------|
+| GET | `/podcasts/channel/{channel_id}` | Get podcast channel |
+| GET | `/podcasts/channel/{channel_id}/episodes` | Get channel episodes |
+| GET | `/podcasts/{browse_id}` | Get podcast |
+| GET | `/podcasts/episode/{browse_id}` | Get episode |
+| GET | `/podcasts/episodes/{browse_id}/playlist` | Get episodes playlist |
+
+### Auth
+
+| Method | Route | Summary |
+|--------|-------|---------|
+| POST | `/auth/credentials` | Save OAuth credentials |
+| GET | `/auth/credentials` | Check credentials status |
+| POST | `/auth/oauth/start` | Start OAuth flow |
+| POST | `/auth/oauth/poll` | Poll OAuth authorization |
+| GET | `/auth/status` | Auth status |
+
+### Stats
+
+| Method | Route | Summary |
+|--------|-------|---------|
+| GET | `/stats/stats` | Service statistics |
 
 ## Requisitos Previos
 
@@ -175,6 +246,15 @@ music_services/
 ├── docker-compose.yml
 └── docker-compose.dev.yml
 ```
+
+## Fixes Recientes
+
+| Ticket | Endpoint | Problema | Solución |
+|--------|----------|----------|----------|
+| SCRUM-32 | `/browse/album/{id}/browse-id` | 500 cuando ytmusicapi retorna None | Fallback a `get_album` para extraer `audioPlaylistId` |
+| SCRUM-33 | `/stats/stats` | 500 por ImportError si Redis no disponible | Graceful degradation con error informativo |
+| SCRUM-34 | `/explore/category/{params}` | ytmusicapi deprecado | Alias de `/explore/moods/{params}` con header `Warning: 299` |
+| SCRUM-35 | `/browse/artist/{id}/albums` | 500 por rate limit (429) | Retry (2 intentos) + fallback via `get_artist()` |
 
 ## Licencia
 

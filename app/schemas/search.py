@@ -35,3 +35,9 @@ class SearchSuggestionsResponse(BaseModel):
     """Response for search suggestions endpoint."""
     
     suggestions: List[str] = Field(..., description="List of search suggestions")
+
+
+class RemoveSuggestionRequest(BaseModel):
+    """Request body for removing a search suggestion."""
+    
+    query: str = Field(..., description="Query a eliminar de las sugerencias", examples=["cumbia"])

@@ -233,7 +233,7 @@ class BrowseService(BaseService):
     @cache_result(ttl=3600)
     async def get_song_related(self, video_id: str) -> List[Dict[str, Any]]:
         """
-        Get related songs.
+        Get related songs with retry and fallback logic.
         
         Args:
             video_id: Video ID.
@@ -243,11 +243,57 @@ class BrowseService(BaseService):
         """
         self._log_operation("get_song_related", video_id=video_id)
         
+        # Keywords to detect rate limit / external service errors
+        retry_keywords = ['429', 'rate limit', 'quota', 'too many requests', '500', '502', 'bad gateway', 'internal server error']
+        
+        async def fetch_related():
+            return await asyncio.to_thread(self.ytmusic.get_song_related, video_id)
+        
+        async def fetch_with_fallback():
+            # First try: direct get_song_related call
+            try:
+                return await fetch_related()
+            except Exception as e:
+                error_msg = str(e).lower()
+                is_retryable = any(kw in error_msg for kw in retry_keywords)
+                if is_retryable:
+                    self.logger.warning(f"Retryable error for related songs {video_id}: {e}")
+                
+                # Second try: get song info to extract related content
+                self.logger.debug(f"get_song_related failed, trying fallback with get_song for {video_id}")
+                try:
+                    song_data = await asyncio.to_thread(self.ytmusic.get_song, video_id)
+                    if song_data:
+                        # Try to extract related content from song response
+                        related = song_data.get("related", [])
+                        if related:
+                            self.logger.info(f"Retrieved related songs via get_song fallback for {video_id}")
+                            return related
+                except Exception as fallback_error:
+                    self.logger.warning(f"Fallback also failed for {video_id}: {fallback_error}")
+                
+                # If we get here, both failed - re-raise the original exception
+                raise
+        
         try:
-            result = await asyncio.to_thread(self.ytmusic.get_song_related, video_id)
-            related = result if result is not None else []
-            self.logger.info(f"Retrieved {len(related)} related songs for: {video_id}")
-            return related
+            # Retry logic: attempt up to 2 times
+            max_retries = 2
+            last_error = None
+            
+            for attempt in range(max_retries):
+                try:
+                    result = await fetch_with_fallback()
+                    related = result if result is not None else []
+                    self.logger.info(f"Retrieved {len(related)} related songs for: {video_id} (attempt {attempt + 1})")
+                    return related
+                except Exception as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        self.logger.warning(f"Attempt {attempt + 1} failed for related {video_id}: {e}, retrying...")
+                        await asyncio.sleep(0.5 * (attempt + 1))  # Exponential backoff
+            
+            # All retries exhausted
+            raise last_error
         except Exception as e:
             raise self._handle_ytmusic_error(e, f"obtener canciones relacionadas de {video_id}")
     

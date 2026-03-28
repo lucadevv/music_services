@@ -198,7 +198,7 @@ async def add_cache_headers(request: Request, call_next):
         path = request.url.path
         
         # Don't cache endpoints that might have user-specific data
-        if not any(x in path for x in ["/library/", "/stats", "/history", "/suggestions"]):
+        if not any(x in path for x in ["/stats", "/history", "/suggestions"]):
             # Cache based on endpoint type
             if "/search" in path:
                 response.headers["Cache-Control"] = "public, max-age=300"  # 5 min

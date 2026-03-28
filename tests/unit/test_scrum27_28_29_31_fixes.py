@@ -143,28 +143,12 @@ class TestSCRUM28_RelatedSongsEmpty:
 
 
 # ============================================================================
-# SCRUM-29: /library/, /uploads/, /stats/stats return 500
+# SCRUM-29: /stats/stats return 500
 # ============================================================================
 
 
-class TestSCRUM29_LibraryUploadsStats:
-    """SCRUM-29: /library/, /uploads/, /stats/stats should return 200."""
-
-    def test_library_root_returns_200(self):
-        with TestClient(app) as client:
-            response = client.get("/api/v1/library/")
-        assert response.status_code == 200
-        data = response.json()
-        assert "message" in data
-        assert "public_endpoints" in data
-
-    def test_uploads_root_returns_200(self):
-        with TestClient(app) as client:
-            response = client.get("/api/v1/uploads/")
-        assert response.status_code == 200
-        data = response.json()
-        assert "message" in data
-        assert "public_endpoints" in data
+class TestSCRUM29_Stats:
+    """SCRUM-29: /stats/stats should return 200."""
 
     def test_stats_returns_200(self):
         with patch("app.core.cache_redis.get_redis_client", return_value=AsyncMock(

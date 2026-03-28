@@ -1,5 +1,5 @@
 """Search endpoints."""
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Body
 from typing import Optional, List, Dict, Any
 from ytmusicapi import YTMusic
 
@@ -7,7 +7,7 @@ from app.core.ytmusic_client import get_ytmusic
 from app.core.validators import validate_search_query, validate_search_filter
 from app.services.search_service import SearchService
 from app.services.stream_service import StreamService
-from app.schemas.search import SearchResponse, SearchSuggestionsResponse
+from app.schemas.search import SearchResponse, SearchSuggestionsResponse, RemoveSuggestionRequest
 from app.schemas.errors import COMMON_ERROR_RESPONSES
 
 router = APIRouter(tags=["search"])
@@ -182,20 +182,32 @@ async def get_search_suggestions(
     }
 )
 async def remove_search_suggestions(
-    q: str = Query(..., description="Query a eliminar de las sugerencias", examples=["cumbia"]),
+    body: Optional[Dict[str, Any]] = Body(None, description="Body con query a eliminar: {\"query\": \"test\"}"),
+    q: Optional[str] = Query(None, description="(Deprecated) Query a eliminar. Usar body en su lugar.", examples=["cumbia"]),
     service: SearchService = Depends(get_search_service)
 ) -> Dict[str, Any]:
     """
     Elimina una sugerencia de búsqueda del historial.
+    
+    Acepta query en body JSON: `{"query": "test"}` o como query param `?q=test` (deprecated).
     
     **Códigos de error:**
     - `VALIDATION_ERROR` (400): Query vacío
     - `AUTHENTICATION_ERROR` (401): Requiere autenticación
     - `EXTERNAL_SERVICE_ERROR` (502): Error de YouTube Music
     """
+    # Prefer body over query param
+    query = body.get("query") if body else q
+    if not query:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=422,
+            detail="Se requiere 'query' en el body o 'q' como query parameter"
+        )
+    
     # Validate query
-    q = validate_search_query(q)
+    query = validate_search_query(query)
     
     # Remove suggestion - exceptions handled by global handlers
-    result = await service.remove_search_suggestions(q)
+    result = await service.remove_search_suggestions(query)
     return {"success": result}

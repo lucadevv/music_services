@@ -110,15 +110,6 @@ def mock_ytmusic():
     mock.get_episode.return_value = {}
     mock.get_episodes_playlist.return_value = {}
     
-    # Library/Upload methods
-    mock.get_library_upload_songs.return_value = []
-    mock.get_library_upload_artists.return_value = []
-    mock.get_library_upload_albums.return_value = []
-    mock.get_library_upload_artist.return_value = {}
-    mock.get_library_upload_album.return_value = {}
-    mock.upload_song.return_value = {}
-    mock.delete_upload_entity.return_value = True
-    
     return mock
 
 

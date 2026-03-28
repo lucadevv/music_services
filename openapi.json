@@ -1,0 +1,5458 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "YouTube Music Service",
+    "description": "\n    🎵 **YouTube Music API Service** - Servicio completo de API para YouTube Music.\n    \n    ## Características\n    \n    - ✅ **Exploración**: Charts, moods, géneros, playlists públicas\n    - 🔍 **Búsqueda**: Canciones, videos, álbumes, artistas, playlists\n    - 🎧 **Streaming**: URLs directas de audio (best quality)\n    - 📱 **Navegación**: Artistas, álbumes, canciones, letras\n    - 🎙️ **Podcasts**: Canales, episodios y playlists\n    - 🔐 **OAuth Admin**: Configuración de autenticación desde panel admin\n    - ⚡ **Rendimiento**: Caché inteligente, circuit breaker, rate limiting\n    \n    ## Autenticación OAuth (Admin)\n    \n    Los endpoints `/api/v1/auth/*` permiten configurar la autenticación OAuth\n    de YouTube Music desde un panel de administración. Todos requieren el header\n    `X-Admin-Key` configurado en `.env` como `ADMIN_SECRET_KEY`.\n    \n    **Flujo:**\n    1. `POST /api/v1/auth/credentials` — Guardar Client ID + Client Secret\n    2. `POST /api/v1/auth/oauth/start` — Iniciar flujo de autorización\n    3. `POST /api/v1/auth/oauth/poll` — Verificar autorización (polling cada 5s)\n    4. `GET /api/v1/auth/status` — Consultar estado de autenticación\n    \n    ## Optimizaciones\n    \n    - **Caché inteligente**: Metadatos (1 día), Stream URLs (4 horas)\n    - **Circuit breaker**: Protección contra rate limiting de YouTube\n    - **Rate limiting**: 60 requests/minuto por IP\n    - **Compresión**: GZip para reducir ancho de banda\n    \n    ## Manejo de Errores\n    \n    La API utiliza códigos de error consistentes:\n    - `VALIDATION_ERROR` (400): Error de validación en parámetros\n    - `AUTHENTICATION_ERROR` (401): Error de autenticación con YouTube\n    - `NOT_FOUND` (404): Recurso no encontrado\n    - `RATE_LIMIT_ERROR` (429): Límite de peticiones excedido\n    - `EXTERNAL_SERVICE_ERROR` (502): Error de servicio externo\n    - `SERVICE_UNAVAILABLE` (503): Servicio temporalmente no disponible\n    - `INTERNAL_ERROR` (500): Error interno del servidor\n    \n    ## Documentación\n    \n    - **Swagger UI**: `/docs` - Interfaz interactiva\n    - **ReDoc**: `/redoc` - Documentación alternativa\n    - **OpenAPI JSON**: `/openapi.json` - Spec descargable\n    ",
+    "termsOfService": "https://example.com/terms/",
+    "contact": {
+      "name": "YouTube Music API Service",
+      "url": "https://github.com/your-repo"
+    },
+    "license": {
+      "name": "MIT"
+    },
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/auth/credentials": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Guardar credenciales OAuth",
+        "description": "Guarda el Client ID y Client Secret de Google Cloud en Redis.\n\nEstas credenciales se usan para iniciar el flujo OAuth y para refrescar tokens.\nSe guardan en Redis (no en .env), por lo que se pueden actualizar desde el panel\nadmin sin reiniciar el servicio.\n\n**Requisitos previos:**\n- Haber creado un OAuth Client ID en Google Cloud Console\n- Application type: \"TVs and Limited Input Devices\"\n- YouTube Data API v3 habilitada",
+        "operationId": "save_credentials_api_v1_auth_credentials_post",
+        "parameters": [
+          {
+            "name": "X-Admin-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Clave secreta de administrador (configurada en .env como ADMIN_SECRET_KEY)",
+              "examples": [
+                "mi-clave-super-secreta"
+              ],
+              "title": "X-Admin-Key"
+            },
+            "description": "Clave secreta de administrador (configurada en .env como ADMIN_SECRET_KEY)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credenciales guardadas exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialsResponse"
+                },
+                "example": {
+                  "has_credentials": true,
+                  "updated_at": "2026-03-27T16:00:00Z"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin key inválida o no configurada",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Admin key inválida."
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Consultar estado de credenciales",
+        "description": "Verifica si hay credenciales OAuth almacenadas en Redis (o en .env como fallback).\nNo expone los valores de client_id ni client_secret por seguridad.",
+        "operationId": "get_credentials_api_v1_auth_credentials_get",
+        "parameters": [
+          {
+            "name": "X-Admin-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Clave secreta de administrador (configurada en .env como ADMIN_SECRET_KEY)",
+              "examples": [
+                "mi-clave-super-secreta"
+              ],
+              "title": "X-Admin-Key"
+            },
+            "description": "Clave secreta de administrador (configurada en .env como ADMIN_SECRET_KEY)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Estado de credenciales",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialsResponse"
+                },
+                "example": {
+                  "has_credentials": true,
+                  "updated_at": "2026-03-27T16:00:00Z"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin key inválida o no configurada",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Admin key inválida."
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oauth/start": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Iniciar flujo OAuth",
+        "description": "Inicia el flujo de autorización OAuth Device Flow de Google.\n\n**Flujo:**\n1. Se solicita un código de dispositivo a Google\n2. Google devuelve una URL de verificación y un código de usuario\n3. El usuario debe abrir la URL e ingresar el código\n4. Se crea una sesión en Redis para hacer polling\n\n**Importante:** La sesión expira en ~15 minutos. Si el usuario no autoriza a tiempo,\ndebes iniciar un nuevo flujo.\n\n**Después de este endpoint:**\n- Muestra al usuario la `verification_url` y el `user_code`\n- Llama a `POST /auth/oauth/poll` con el `session_id` cada 5 segundos",
+        "operationId": "start_oauth_flow_api_v1_auth_oauth_start_post",
+        "parameters": [
+          {
+            "name": "X-Admin-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Clave secreta de administrador (configurada en .env como ADMIN_SECRET_KEY)",
+              "examples": [
+                "mi-clave-super-secreta"
+              ],
+              "title": "X-Admin-Key"
+            },
+            "description": "Clave secreta de administrador (configurada en .env como ADMIN_SECRET_KEY)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Flujo OAuth iniciado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthStartResponse"
+                },
+                "example": {
+                  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                  "verification_url": "https://www.google.com/device",
+                  "user_code": "ABCD-EFGH",
+                  "expires_in": 900,
+                  "interval": 5
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin key inválida o no configurada",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Admin key inválida."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No hay credenciales OAuth configuradas",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "No hay credenciales OAuth configuradas. Guarda client_id y client_secret primero."
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error comunicándose con Google OAuth",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Error comunicándose con Google OAuth: ..."
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oauth/poll": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Verificar autorización OAuth",
+        "description": "Verifica si el usuario completó la autorización en Google.\n\n**Polling:** Llamar cada 5 segundos (usar el `interval` de `/oauth/start`) hasta recibir\n`status: \"authorized\"`.\n\n**Respuestas posibles:**\n- `200` con `status: \"pending\"` → El usuario aún no autorizó. Seguir haciendo polling.\n- `200` con `status: \"authorized\"` → Autorización completada. Token guardado en `oauth.json`.\n- `410` → Sesión expirada o denegada. Iniciar nuevo flujo con `/oauth/start`.\n- `502` → Error de comunicación con Google.\n\n**Cuando la autorización es exitosa:**\n1. Se filtran campos extra de la respuesta de Google (workaround bug ytmusicapi)\n2. Se escribe `oauth.json` con los campos correctos\n3. Se invalida el cache del cliente YTMusic\n4. Se elimina la sesión de Redis",
+        "operationId": "poll_oauth_authorization_api_v1_auth_oauth_poll_post",
+        "parameters": [
+          {
+            "name": "X-Admin-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Clave secreta de administrador (configurada en .env como ADMIN_SECRET_KEY)",
+              "examples": [
+                "mi-clave-super-secreta"
+              ],
+              "title": "X-Admin-Key"
+            },
+            "description": "Clave secreta de administrador (configurada en .env como ADMIN_SECRET_KEY)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthPollRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resultado del polling",
+            "content": {
+              "application/json": {
+                "schema": {},
+                "examples": {
+                  "pending": {
+                    "summary": "Esperando autorización",
+                    "value": {
+                      "status": "pending",
+                      "message": "Waiting for user authorization"
+                    }
+                  },
+                  "authorized": {
+                    "summary": "Autorización completada",
+                    "value": {
+                      "status": "authorized",
+                      "message": "OAuth token saved successfully"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin key inválida o no configurada",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Admin key inválida."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sesión no encontrada o expirada",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Sesión no encontrada o expirada. Inicia un nuevo flujo OAuth."
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Sesión expirada o denegada por el usuario",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Sesión expirada o denegada. Inicia un nuevo flujo OAuth."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No hay credenciales OAuth configuradas",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "No hay credenciales OAuth configuradas. Guarda client_id y client_secret primero."
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error comunicándose con Google OAuth",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Error comunicándose con Google OAuth: ..."
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/status": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Estado de autenticación",
+        "description": "Verifica el estado completo de la autenticación OAuth del servicio.\n\n**Qué verifica:**\n- `has_credentials`: Si hay credenciales almacenadas (Redis o .env)\n- `has_token`: Si el archivo `oauth.json` existe\n- `authenticated`: Si el cliente YTMusic puede hacer requests a YouTube Music (hace una prueba real)\n\n**Uso típico:** Llamar al cargar el panel admin para mostrar el estado actual.",
+        "operationId": "get_auth_status_api_v1_auth_status_get",
+        "parameters": [
+          {
+            "name": "X-Admin-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Clave secreta de administrador (configurada en .env como ADMIN_SECRET_KEY)",
+              "examples": [
+                "mi-clave-super-secreta"
+              ],
+              "title": "X-Admin-Key"
+            },
+            "description": "Clave secreta de administrador (configurada en .env como ADMIN_SECRET_KEY)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Estado de autenticación",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStatusResponse"
+                },
+                "examples": {
+                  "not_configured": {
+                    "summary": "Sin credenciales",
+                    "value": {
+                      "authenticated": false,
+                      "has_credentials": false,
+                      "has_token": false,
+                      "method": "oauth"
+                    }
+                  },
+                  "credentials_only": {
+                    "summary": "Credenciales sin token",
+                    "value": {
+                      "authenticated": false,
+                      "has_credentials": true,
+                      "has_token": false,
+                      "method": "oauth"
+                    }
+                  },
+                  "fully_authenticated": {
+                    "summary": "Autenticado correctamente",
+                    "value": {
+                      "authenticated": true,
+                      "has_credentials": true,
+                      "has_token": true,
+                      "method": "oauth"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin key inválida o no configurada",
+            "content": {
+              "application/json": {
+                "example": {
+                  "detail": "Admin key inválida."
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browse/home": {
+      "get": {
+        "tags": [
+          "browse",
+          "browse"
+        ],
+        "summary": "Get home page",
+        "description": "Obtiene el contenido de la página principal de YouTube Music.",
+        "operationId": "get_home_api_v1_browse_home_get",
+        "responses": {
+          "200": {
+            "description": "Contenido obtenido exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Error de validación",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": true,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Error de validación en 'video_id': ID de video inválido. Debe tener exactamente 11 caracteres.",
+                  "details": {
+                    "field": "video_id",
+                    "reason": "invalid_length",
+                    "expected_length": 11,
+                    "actual_length": 5
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Error de autenticación",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": true,
+                  "error_code": "AUTHENTICATION_ERROR",
+                  "message": "Error de autenticación con YouTube Music. Verifica las credenciales.",
+                  "details": {
+                    "operation": "search",
+                    "hint": "Check server logs for details"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found - Recurso no encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": true,
+                  "error_code": "NOT_FOUND",
+                  "message": "Video no encontrado.",
+                  "details": {
+                    "resource_type": "video",
+                    "resource_id": "rMbATaj7Il8"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit excedido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": true,
+                  "error_code": "RATE_LIMIT_ERROR",
+                  "message": "Límite de peticiones excedido. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "retry_after": 300
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": true,
+                  "error_code": "INTERNAL_ERROR",
+                  "message": "Ha ocurrido un error interno. Por favor intenta más tarde."
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway - Error de servicio externo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": true,
+                  "error_code": "EXTERNAL_SERVICE_ERROR",
+                  "message": "Error en YouTube Music durante get_stream. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "service": "YouTube Music"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable - Servicio no disponible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "error": true,
+                  "error_code": "SERVICE_UNAVAILABLE",
+                  "message": "Servicio temporalmente no disponible debido a sobrecarga.",
+                  "details": {
+                    "retry_after": 180,
+                    "state": "OPEN"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browse/artist/{channel_id}/albums": {
+      "get": {
+        "tags": [
+          "browse",
+          "browse"
+        ],
+        "summary": "Get artist albums",
+        "description": "Obtiene todos los álbumes de un artista.",
+        "operationId": "get_artist_albums_api_v1_browse_artist__channel_id__albums_get",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ID del canal del artista",
+              "examples": {
+                "example1": {
+                  "value": "UC..."
+                }
+              },
+              "title": "Channel Id"
+            },
+            "description": "ID del canal del artista"
+          },
+          {
+            "name": "params",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Parámetros de paginación",
+              "title": "Params"
+            },
+            "description": "Parámetros de paginación"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Álbumes obtenidos exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtistAlbumsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Error de validación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Error de validación en 'video_id': ID de video inválido. Debe tener exactamente 11 caracteres.",
+                  "details": {
+                    "field": "video_id",
+                    "reason": "invalid_length",
+                    "expected_length": 11,
+                    "actual_length": 5
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Error de autenticación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "AUTHENTICATION_ERROR",
+                  "message": "Error de autenticación con YouTube Music. Verifica las credenciales.",
+                  "details": {
+                    "operation": "search",
+                    "hint": "Check server logs for details"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found - Recurso no encontrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "NOT_FOUND",
+                  "message": "Video no encontrado.",
+                  "details": {
+                    "resource_type": "video",
+                    "resource_id": "rMbATaj7Il8"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit excedido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "RATE_LIMIT_ERROR",
+                  "message": "Límite de peticiones excedido. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "retry_after": 300
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "INTERNAL_ERROR",
+                  "message": "Ha ocurrido un error interno. Por favor intenta más tarde."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway - Error de servicio externo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "EXTERNAL_SERVICE_ERROR",
+                  "message": "Error en YouTube Music durante get_stream. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "service": "YouTube Music"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable - Servicio no disponible",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "SERVICE_UNAVAILABLE",
+                  "message": "Servicio temporalmente no disponible debido a sobrecarga.",
+                  "details": {
+                    "retry_after": 180,
+                    "state": "OPEN"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browse/album/{album_id}": {
+      "get": {
+        "tags": [
+          "browse",
+          "browse"
+        ],
+        "summary": "Get album information",
+        "description": "Obtiene información completa de un álbum incluyendo todas sus canciones.",
+        "operationId": "get_album_api_v1_browse_album__album_id__get",
+        "parameters": [
+          {
+            "name": "album_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ID del álbum",
+              "examples": {
+                "example1": {
+                  "value": "MPREb..."
+                }
+              },
+              "title": "Album Id"
+            },
+            "description": "ID del álbum"
+          },
+          {
+            "name": "include_stream_urls",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Incluir stream URLs y mejores thumbnails para tracks",
+              "default": true,
+              "title": "Include Stream Urls"
+            },
+            "description": "Incluir stream URLs y mejores thumbnails para tracks"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Álbum obtenido exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlbumResponse"
+                },
+                "example": {
+                  "title": "Album Title",
+                  "artists": [
+                    {
+                      "name": "Artist"
+                    }
+                  ],
+                  "tracks": [
+                    {
+                      "videoId": "rMbATaj7Il8",
+                      "title": "Track Title",
+                      "stream_url": "https://...",
+                      "thumbnail": "https://..."
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Error de validación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Error de validación en 'video_id': ID de video inválido. Debe tener exactamente 11 caracteres.",
+                  "details": {
+                    "field": "video_id",
+                    "reason": "invalid_length",
+                    "expected_length": 11,
+                    "actual_length": 5
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Error de autenticación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "AUTHENTICATION_ERROR",
+                  "message": "Error de autenticación con YouTube Music. Verifica las credenciales.",
+                  "details": {
+                    "operation": "search",
+                    "hint": "Check server logs for details"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found - Recurso no encontrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "NOT_FOUND",
+                  "message": "Video no encontrado.",
+                  "details": {
+                    "resource_type": "video",
+                    "resource_id": "rMbATaj7Il8"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit excedido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "RATE_LIMIT_ERROR",
+                  "message": "Límite de peticiones excedido. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "retry_after": 300
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "INTERNAL_ERROR",
+                  "message": "Ha ocurrido un error interno. Por favor intenta más tarde."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway - Error de servicio externo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "EXTERNAL_SERVICE_ERROR",
+                  "message": "Error en YouTube Music durante get_stream. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "service": "YouTube Music"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable - Servicio no disponible",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "SERVICE_UNAVAILABLE",
+                  "message": "Servicio temporalmente no disponible debido a sobrecarga.",
+                  "details": {
+                    "retry_after": 180,
+                    "state": "OPEN"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browse/album/{album_id}/browse-id": {
+      "get": {
+        "tags": [
+          "browse",
+          "browse"
+        ],
+        "summary": "Get album browse ID",
+        "description": "Obtiene el browse ID de un álbum a partir de su ID.",
+        "operationId": "get_album_browse_id_api_v1_browse_album__album_id__browse_id_get",
+        "parameters": [
+          {
+            "name": "album_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ID del álbum",
+              "examples": {
+                "example1": {
+                  "value": "MPREb..."
+                }
+              },
+              "title": "Album Id"
+            },
+            "description": "ID del álbum"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Browse ID obtenido exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Album Browse Id Api V1 Browse Album  Album Id  Browse Id Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Error de validación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Error de validación en 'video_id': ID de video inválido. Debe tener exactamente 11 caracteres.",
+                  "details": {
+                    "field": "video_id",
+                    "reason": "invalid_length",
+                    "expected_length": 11,
+                    "actual_length": 5
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Error de autenticación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "AUTHENTICATION_ERROR",
+                  "message": "Error de autenticación con YouTube Music. Verifica las credenciales.",
+                  "details": {
+                    "operation": "search",
+                    "hint": "Check server logs for details"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found - Recurso no encontrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "NOT_FOUND",
+                  "message": "Video no encontrado.",
+                  "details": {
+                    "resource_type": "video",
+                    "resource_id": "rMbATaj7Il8"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit excedido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "RATE_LIMIT_ERROR",
+                  "message": "Límite de peticiones excedido. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "retry_after": 300
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "INTERNAL_ERROR",
+                  "message": "Ha ocurrido un error interno. Por favor intenta más tarde."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway - Error de servicio externo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "EXTERNAL_SERVICE_ERROR",
+                  "message": "Error en YouTube Music durante get_stream. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "service": "YouTube Music"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable - Servicio no disponible",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "SERVICE_UNAVAILABLE",
+                  "message": "Servicio temporalmente no disponible debido a sobrecarga.",
+                  "details": {
+                    "retry_after": 180,
+                    "state": "OPEN"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browse/song/{video_id}": {
+      "get": {
+        "tags": [
+          "browse",
+          "browse"
+        ],
+        "summary": "Get song metadata",
+        "description": "Obtiene metadatos completos de una canción.",
+        "operationId": "get_song_api_v1_browse_song__video_id__get",
+        "parameters": [
+          {
+            "name": "video_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ID del video/canción",
+              "examples": {
+                "example1": {
+                  "value": "rMbATaj7Il8"
+                }
+              },
+              "title": "Video Id"
+            },
+            "description": "ID del video/canción"
+          },
+          {
+            "name": "signature_timestamp",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Timestamp de firma (opcional)",
+              "title": "Signature Timestamp"
+            },
+            "description": "Timestamp de firma (opcional)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canción obtenida exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SongResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Error de validación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Error de validación en 'video_id': ID de video inválido. Debe tener exactamente 11 caracteres.",
+                  "details": {
+                    "field": "video_id",
+                    "reason": "invalid_length",
+                    "expected_length": 11,
+                    "actual_length": 5
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Error de autenticación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "AUTHENTICATION_ERROR",
+                  "message": "Error de autenticación con YouTube Music. Verifica las credenciales.",
+                  "details": {
+                    "operation": "search",
+                    "hint": "Check server logs for details"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found - Recurso no encontrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "NOT_FOUND",
+                  "message": "Video no encontrado.",
+                  "details": {
+                    "resource_type": "video",
+                    "resource_id": "rMbATaj7Il8"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit excedido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "RATE_LIMIT_ERROR",
+                  "message": "Límite de peticiones excedido. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "retry_after": 300
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "INTERNAL_ERROR",
+                  "message": "Ha ocurrido un error interno. Por favor intenta más tarde."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway - Error de servicio externo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "EXTERNAL_SERVICE_ERROR",
+                  "message": "Error en YouTube Music durante get_stream. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "service": "YouTube Music"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable - Servicio no disponible",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "SERVICE_UNAVAILABLE",
+                  "message": "Servicio temporalmente no disponible debido a sobrecarga.",
+                  "details": {
+                    "retry_after": 180,
+                    "state": "OPEN"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browse/song/{video_id}/related": {
+      "get": {
+        "tags": [
+          "browse",
+          "browse"
+        ],
+        "summary": "Get related songs",
+        "description": "Obtiene canciones relacionadas a una canción específica.",
+        "operationId": "get_song_related_api_v1_browse_song__video_id__related_get",
+        "parameters": [
+          {
+            "name": "video_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ID del video/canción",
+              "examples": {
+                "example1": {
+                  "value": "rMbATaj7Il8"
+                }
+              },
+              "title": "Video Id"
+            },
+            "description": "ID del video/canción"
+          },
+          {
+            "name": "include_stream_urls",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Incluir stream URLs y mejores thumbnails",
+              "default": false,
+              "title": "Include Stream Urls"
+            },
+            "description": "Incluir stream URLs y mejores thumbnails"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canciones relacionadas obtenidas exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response Get Song Related Api V1 Browse Song  Video Id  Related Get"
+                },
+                "example": [
+                  {
+                    "videoId": "abc123",
+                    "title": "Related Song",
+                    "stream_url": "https://...",
+                    "thumbnail": "https://..."
+                  }
+                ]
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno"
+          },
+          "502": {
+            "description": "Bad Gateway"
+          },
+          "404": {
+            "description": "No encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browse/lyrics/{browse_id}": {
+      "get": {
+        "tags": [
+          "browse",
+          "browse"
+        ],
+        "summary": "Get song lyrics",
+        "description": "Obtiene las letras de una canción usando su browse ID.",
+        "operationId": "get_lyrics_api_v1_browse_lyrics__browse_id__get",
+        "parameters": [
+          {
+            "name": "browse_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Browse ID de la canción",
+              "examples": {
+                "example1": {
+                  "value": "MPAD..."
+                }
+              },
+              "title": "Browse Id"
+            },
+            "description": "Browse ID de la canción"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Letras obtenidas exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Lyrics Api V1 Browse Lyrics  Browse Id  Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Error de validación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Error de validación en 'video_id': ID de video inválido. Debe tener exactamente 11 caracteres.",
+                  "details": {
+                    "field": "video_id",
+                    "reason": "invalid_length",
+                    "expected_length": 11,
+                    "actual_length": 5
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Error de autenticación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "AUTHENTICATION_ERROR",
+                  "message": "Error de autenticación con YouTube Music. Verifica las credenciales.",
+                  "details": {
+                    "operation": "search",
+                    "hint": "Check server logs for details"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found - Recurso no encontrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "NOT_FOUND",
+                  "message": "Video no encontrado.",
+                  "details": {
+                    "resource_type": "video",
+                    "resource_id": "rMbATaj7Il8"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit excedido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "RATE_LIMIT_ERROR",
+                  "message": "Límite de peticiones excedido. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "retry_after": 300
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "INTERNAL_ERROR",
+                  "message": "Ha ocurrido un error interno. Por favor intenta más tarde."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway - Error de servicio externo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "EXTERNAL_SERVICE_ERROR",
+                  "message": "Error en YouTube Music durante get_stream. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "service": "YouTube Music"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable - Servicio no disponible",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "SERVICE_UNAVAILABLE",
+                  "message": "Servicio temporalmente no disponible debido a sobrecarga.",
+                  "details": {
+                    "retry_after": 180,
+                    "state": "OPEN"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browse/lyrics-by-video/{video_id}": {
+      "get": {
+        "tags": [
+          "browse",
+          "browse"
+        ],
+        "summary": "Get song lyrics by video ID",
+        "description": "Obtiene las letras de una canción usando su video ID.",
+        "operationId": "get_lyrics_by_video_api_v1_browse_lyrics_by_video__video_id__get",
+        "parameters": [
+          {
+            "name": "video_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Video ID de YouTube",
+              "examples": {
+                "example1": {
+                  "value": "dQw4w9WgXcQ"
+                }
+              },
+              "title": "Video Id"
+            },
+            "description": "Video ID de YouTube"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Letras obtenidas exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Lyrics By Video Api V1 Browse Lyrics By Video  Video Id  Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Error de validación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Error de validación en 'video_id': ID de video inválido. Debe tener exactamente 11 caracteres.",
+                  "details": {
+                    "field": "video_id",
+                    "reason": "invalid_length",
+                    "expected_length": 11,
+                    "actual_length": 5
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Error de autenticación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "AUTHENTICATION_ERROR",
+                  "message": "Error de autenticación con YouTube Music. Verifica las credenciales.",
+                  "details": {
+                    "operation": "search",
+                    "hint": "Check server logs for details"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found - Recurso no encontrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "NOT_FOUND",
+                  "message": "Video no encontrado.",
+                  "details": {
+                    "resource_type": "video",
+                    "resource_id": "rMbATaj7Il8"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit excedido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "RATE_LIMIT_ERROR",
+                  "message": "Límite de peticiones excedido. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "retry_after": 300
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "INTERNAL_ERROR",
+                  "message": "Ha ocurrido un error interno. Por favor intenta más tarde."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway - Error de servicio externo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "EXTERNAL_SERVICE_ERROR",
+                  "message": "Error en YouTube Music durante get_stream. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "service": "YouTube Music"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable - Servicio no disponible",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "SERVICE_UNAVAILABLE",
+                  "message": "Servicio temporalmente no disponible debido a sobrecarga.",
+                  "details": {
+                    "retry_after": 180,
+                    "state": "OPEN"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/": {
+      "get": {
+        "tags": [
+          "explore",
+          "explore"
+        ],
+        "summary": "Get explore content",
+        "description": "Obtiene contenido de exploración: moods, géneros, charts y home. Incluye top songs y trending con stream URLs opcionales.",
+        "operationId": "explore_music_api_v1_explore__get",
+        "parameters": [
+          {
+            "name": "include_stream_urls",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Incluir stream URLs y mejores thumbnails para charts",
+              "default": false,
+              "title": "Include Stream Urls"
+            },
+            "description": "Incluir stream URLs y mejores thumbnails para charts"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "Número máximo de canciones en charts",
+              "default": 10,
+              "title": "Limit"
+            },
+            "description": "Número máximo de canciones en charts"
+          },
+          {
+            "name": "start_index",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Índice inicial para paginación de charts",
+              "default": 0,
+              "title": "Start Index"
+            },
+            "description": "Índice inicial para paginación de charts"
+          },
+          {
+            "name": "prefetch_count",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": -1,
+              "description": "Número de URLs a obtener en paralelo (0=none, -1=todas)",
+              "default": 10,
+              "title": "Prefetch Count"
+            },
+            "description": "Número de URLs a obtener en paralelo (0=none, -1=todas)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Contenido de exploración obtenido exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Explore Music Api V1 Explore  Get"
+                },
+                "example": {
+                  "moods_genres": [
+                    {
+                      "title": "Cumbia",
+                      "params": "ggMPOg1uX3hRRFdlaEhHU09k"
+                    }
+                  ],
+                  "home": [],
+                  "charts": {
+                    "top_songs": [
+                      {
+                        "videoId": "rMbATaj7Il8",
+                        "title": "Song Title",
+                        "artists": [
+                          {
+                            "name": "Artist"
+                          }
+                        ],
+                        "stream_url": "https://...",
+                        "thumbnail": "https://..."
+                      }
+                    ],
+                    "trending": []
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno del servidor"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/moods": {
+      "get": {
+        "tags": [
+          "explore",
+          "explore"
+        ],
+        "summary": "Get mood categories",
+        "description": "Obtiene todas las categorías de moods y géneros disponibles en YouTube Music.",
+        "operationId": "get_mood_categories_api_v1_explore_moods_get",
+        "responses": {
+          "200": {
+            "description": "Categorías obtenidas exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Mood Categories Api V1 Explore Moods Get"
+                },
+                "example": {
+                  "categories": {
+                    "For you": [
+                      {
+                        "params": "ggMPOg1uX1ZwN0pHT2NBT1Fk",
+                        "title": "1980s"
+                      }
+                    ],
+                    "Genres": [
+                      {
+                        "params": "ggMPOg1uX3hRRFdlaEhHU09k",
+                        "title": "Cumbia"
+                      }
+                    ],
+                    "Moods & moments": [
+                      {
+                        "params": "ggMPOg1uXzVuc0dnZlhpV3Ba",
+                        "title": "Chill"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno del servidor"
+          }
+        }
+      }
+    },
+    "/api/v1/explore/moods/{params}": {
+      "get": {
+        "tags": [
+          "explore",
+          "explore"
+        ],
+        "summary": "Get mood/genre playlists",
+        "description": "Obtiene playlists de una categoría de mood o género usando sus parámetros codificados.",
+        "operationId": "get_mood_playlists_api_v1_explore_moods__params__get",
+        "parameters": [
+          {
+            "name": "params",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Parámetros codificados de la categoría",
+              "examples": {
+                "example1": {
+                  "value": "ggMPOg1uX3hRRFdlaEhHU09k"
+                }
+              },
+              "title": "Params"
+            },
+            "description": "Parámetros codificados de la categoría"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Playlists obtenidas exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Mood Playlists Api V1 Explore Moods  Params  Get"
+                },
+                "example": {
+                  "playlists": [
+                    {
+                      "title": "Cumbia Mix",
+                      "playlistId": "PL123"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Categoría no encontrada (params inválidos)"
+          },
+          "500": {
+            "description": "Error interno del servidor"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/charts": {
+      "get": {
+        "tags": [
+          "explore",
+          "explore"
+        ],
+        "summary": "Get music charts",
+        "description": "Obtiene los charts de YouTube Music: top songs y trending. Opcionalmente incluye stream URLs.",
+        "operationId": "get_charts_api_v1_explore_charts_get",
+        "parameters": [
+          {
+            "name": "country",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Código de país ISO 3166-1 Alpha-2 (ej: 'US', 'PE'). Default: global",
+              "title": "Country"
+            },
+            "description": "Código de país ISO 3166-1 Alpha-2 (ej: 'US', 'PE'). Default: global"
+          },
+          {
+            "name": "include_stream_urls",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Incluir stream URLs y mejores thumbnails",
+              "default": false,
+              "title": "Include Stream Urls"
+            },
+            "description": "Incluir stream URLs y mejores thumbnails"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Charts obtenidos exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Charts Api V1 Explore Charts Get"
+                },
+                "example": {
+                  "top_songs": [
+                    {
+                      "videoId": "rMbATaj7Il8",
+                      "title": "Top Song",
+                      "artists": [
+                        {
+                          "name": "Artist"
+                        }
+                      ],
+                      "stream_url": "https://...",
+                      "thumbnail": "https://..."
+                    }
+                  ],
+                  "trending": [],
+                  "country": "global"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno del servidor"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/explore/category/{category_params}": {
+      "get": {
+        "tags": [
+          "explore",
+          "explore"
+        ],
+        "summary": "Get category playlists (alias) - DEPRECATED",
+        "description": "Alias para `/explore/moods/{params}`. Obtiene playlists de una categoría. ⚠️ ENDPOINT DEPRECADO - usar `/explore/moods/{params}` en su lugar.",
+        "operationId": "get_category_api_v1_explore_category__category_params__get",
+        "parameters": [
+          {
+            "name": "category_params",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Params de la categoría",
+              "examples": {
+                "example1": {
+                  "value": "ggMPOg1uX3hRRFdlaEhHU09k"
+                }
+              },
+              "title": "Category Params"
+            },
+            "description": "Params de la categoría"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Playlists obtenidas exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Category Api V1 Explore Category  Category Params  Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Error de validación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Error de validación en 'video_id': ID de video inválido. Debe tener exactamente 11 caracteres.",
+                  "details": {
+                    "field": "video_id",
+                    "reason": "invalid_length",
+                    "expected_length": 11,
+                    "actual_length": 5
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Error de autenticación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "AUTHENTICATION_ERROR",
+                  "message": "Error de autenticación con YouTube Music. Verifica las credenciales.",
+                  "details": {
+                    "operation": "search",
+                    "hint": "Check server logs for details"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found - Recurso no encontrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "NOT_FOUND",
+                  "message": "Video no encontrado.",
+                  "details": {
+                    "resource_type": "video",
+                    "resource_id": "rMbATaj7Il8"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit excedido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "RATE_LIMIT_ERROR",
+                  "message": "Límite de peticiones excedido. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "retry_after": 300
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "INTERNAL_ERROR",
+                  "message": "Ha ocurrido un error interno. Por favor intenta más tarde."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway - Error de servicio externo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "EXTERNAL_SERVICE_ERROR",
+                  "message": "Error en YouTube Music durante get_stream. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "service": "YouTube Music"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable - Servicio no disponible",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "SERVICE_UNAVAILABLE",
+                  "message": "Servicio temporalmente no disponible debido a sobrecarga.",
+                  "details": {
+                    "retry_after": 180,
+                    "state": "OPEN"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search/": {
+      "get": {
+        "tags": [
+          "search",
+          "search"
+        ],
+        "summary": "Search music content",
+        "description": "Busca contenido musical en YouTube Music: canciones, videos, álbumes, artistas y playlists.",
+        "operationId": "search_music_api_v1_search__get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Query de búsqueda",
+              "examples": [
+                "cumbia peruana"
+              ],
+              "title": "Q"
+            },
+            "description": "Query de búsqueda"
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filtro: songs, videos, albums, artists, playlists",
+              "examples": [
+                "songs"
+              ],
+              "title": "Filter"
+            },
+            "description": "Filtro: songs, videos, albums, artists, playlists"
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Scope de búsqueda",
+              "title": "Scope"
+            },
+            "description": "Scope de búsqueda"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "Número de resultados",
+              "default": 10,
+              "title": "Limit"
+            },
+            "description": "Número de resultados"
+          },
+          {
+            "name": "start_index",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Índice inicial para paginación",
+              "default": 0,
+              "title": "Start Index"
+            },
+            "description": "Índice inicial para paginación"
+          },
+          {
+            "name": "ignore_spelling",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Ignorar sugerencias de ortografía",
+              "default": false,
+              "title": "Ignore Spelling"
+            },
+            "description": "Ignorar sugerencias de ortografía"
+          },
+          {
+            "name": "include_stream_urls",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Incluir stream URLs y mejores thumbnails para songs/videos",
+              "default": true,
+              "title": "Include Stream Urls"
+            },
+            "description": "Incluir stream URLs y mejores thumbnails para songs/videos"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Búsqueda exitosa",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Search Music Api V1 Search  Get"
+                },
+                "example": {
+                  "results": [
+                    {
+                      "videoId": "rMbATaj7Il8",
+                      "title": "Song Title",
+                      "artists": [
+                        {
+                          "name": "Artist"
+                        }
+                      ],
+                      "album": {
+                        "name": "Album"
+                      },
+                      "stream_url": "https://...",
+                      "thumbnail": "https://..."
+                    }
+                  ],
+                  "query": "search query"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Error de validación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Error de validación en 'video_id': ID de video inválido. Debe tener exactamente 11 caracteres.",
+                  "details": {
+                    "field": "video_id",
+                    "reason": "invalid_length",
+                    "expected_length": 11,
+                    "actual_length": 5
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Error de autenticación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "AUTHENTICATION_ERROR",
+                  "message": "Error de autenticación con YouTube Music. Verifica las credenciales.",
+                  "details": {
+                    "operation": "search",
+                    "hint": "Check server logs for details"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found - Recurso no encontrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "NOT_FOUND",
+                  "message": "Video no encontrado.",
+                  "details": {
+                    "resource_type": "video",
+                    "resource_id": "rMbATaj7Il8"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit excedido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "RATE_LIMIT_ERROR",
+                  "message": "Límite de peticiones excedido. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "retry_after": 300
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "INTERNAL_ERROR",
+                  "message": "Ha ocurrido un error interno. Por favor intenta más tarde."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway - Error de servicio externo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "EXTERNAL_SERVICE_ERROR",
+                  "message": "Error en YouTube Music durante get_stream. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "service": "YouTube Music"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable - Servicio no disponible",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "SERVICE_UNAVAILABLE",
+                  "message": "Servicio temporalmente no disponible debido a sobrecarga.",
+                  "details": {
+                    "retry_after": 180,
+                    "state": "OPEN"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search/suggestions": {
+      "get": {
+        "tags": [
+          "search",
+          "search"
+        ],
+        "summary": "Get search suggestions",
+        "description": "Obtiene sugerencias de búsqueda basadas en el query parcial.",
+        "operationId": "get_search_suggestions_api_v1_search_suggestions_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Query parcial para obtener sugerencias",
+              "examples": [
+                "cumb"
+              ],
+              "title": "Q"
+            },
+            "description": "Query parcial para obtener sugerencias"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sugerencias obtenidas exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Search Suggestions Api V1 Search Suggestions Get"
+                },
+                "example": {
+                  "suggestions": [
+                    "cumbia peruana",
+                    "cumbia colombiana",
+                    "cumbia villera"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Error de validación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Error de validación en 'video_id': ID de video inválido. Debe tener exactamente 11 caracteres.",
+                  "details": {
+                    "field": "video_id",
+                    "reason": "invalid_length",
+                    "expected_length": 11,
+                    "actual_length": 5
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Error de autenticación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "AUTHENTICATION_ERROR",
+                  "message": "Error de autenticación con YouTube Music. Verifica las credenciales.",
+                  "details": {
+                    "operation": "search",
+                    "hint": "Check server logs for details"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found - Recurso no encontrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "NOT_FOUND",
+                  "message": "Video no encontrado.",
+                  "details": {
+                    "resource_type": "video",
+                    "resource_id": "rMbATaj7Il8"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit excedido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "RATE_LIMIT_ERROR",
+                  "message": "Límite de peticiones excedido. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "retry_after": 300
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "INTERNAL_ERROR",
+                  "message": "Ha ocurrido un error interno. Por favor intenta más tarde."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway - Error de servicio externo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "EXTERNAL_SERVICE_ERROR",
+                  "message": "Error en YouTube Music durante get_stream. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "service": "YouTube Music"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable - Servicio no disponible",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "SERVICE_UNAVAILABLE",
+                  "message": "Servicio temporalmente no disponible debido a sobrecarga.",
+                  "details": {
+                    "retry_after": 180,
+                    "state": "OPEN"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "search",
+          "search"
+        ],
+        "summary": "Remove search suggestions",
+        "description": "Elimina una sugerencia de búsqueda del historial.",
+        "operationId": "remove_search_suggestions_api_v1_search_suggestions_delete",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Query a eliminar de las sugerencias",
+              "examples": [
+                "cumbia"
+              ],
+              "title": "Q"
+            },
+            "description": "Query a eliminar de las sugerencias"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sugerencia eliminada exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Remove Search Suggestions Api V1 Search Suggestions Delete"
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Error de validación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Error de validación en 'video_id': ID de video inválido. Debe tener exactamente 11 caracteres.",
+                  "details": {
+                    "field": "video_id",
+                    "reason": "invalid_length",
+                    "expected_length": 11,
+                    "actual_length": 5
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Error de autenticación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "AUTHENTICATION_ERROR",
+                  "message": "Error de autenticación con YouTube Music. Verifica las credenciales.",
+                  "details": {
+                    "operation": "search",
+                    "hint": "Check server logs for details"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found - Recurso no encontrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "NOT_FOUND",
+                  "message": "Video no encontrado.",
+                  "details": {
+                    "resource_type": "video",
+                    "resource_id": "rMbATaj7Il8"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit excedido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "RATE_LIMIT_ERROR",
+                  "message": "Límite de peticiones excedido. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "retry_after": 300
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "INTERNAL_ERROR",
+                  "message": "Ha ocurrido un error interno. Por favor intenta más tarde."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway - Error de servicio externo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "EXTERNAL_SERVICE_ERROR",
+                  "message": "Error en YouTube Music durante get_stream. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "service": "YouTube Music"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable - Servicio no disponible",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "SERVICE_UNAVAILABLE",
+                  "message": "Servicio temporalmente no disponible debido a sobrecarga.",
+                  "details": {
+                    "retry_after": 180,
+                    "state": "OPEN"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/library/": {
+      "get": {
+        "tags": [
+          "library",
+          "library"
+        ],
+        "summary": "Library information",
+        "description": "Información sobre endpoints de biblioteca. Los endpoints de biblioteca requieren autenticación de usuario.",
+        "operationId": "library_info_api_v1_library__get",
+        "responses": {
+          "200": {
+            "description": "Información y endpoints públicos alternativos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Library Info Api V1 Library  Get"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Endpoint no implementado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "NOT_IMPLEMENTED",
+                  "message": "Library endpoints are not implemented in this version. Use /api/v1/explore for public content."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/playlists/{playlist_id}": {
+      "get": {
+        "tags": [
+          "playlists",
+          "playlists"
+        ],
+        "summary": "Get playlist",
+        "description": "Obtiene información completa de una playlist pública incluyendo todas sus canciones.",
+        "operationId": "get_playlist_api_v1_playlists__playlist_id__get",
+        "parameters": [
+          {
+            "name": "playlist_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ID de la playlist (acepta browseId con prefijo VL)",
+              "examples": {
+                "example1": {
+                  "value": "PL..."
+                }
+              },
+              "title": "Playlist Id"
+            },
+            "description": "ID de la playlist (acepta browseId con prefijo VL)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 1,
+              "description": "Número máximo de canciones",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Número máximo de canciones"
+          },
+          {
+            "name": "start_index",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Índice inicial para paginación",
+              "default": 0,
+              "title": "Start Index"
+            },
+            "description": "Índice inicial para paginación"
+          },
+          {
+            "name": "related",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Incluir canciones relacionadas",
+              "default": false,
+              "title": "Related"
+            },
+            "description": "Incluir canciones relacionadas"
+          },
+          {
+            "name": "suggestions_limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 0,
+              "description": "Límite de sugerencias",
+              "default": 0,
+              "title": "Suggestions Limit"
+            },
+            "description": "Límite de sugerencias"
+          },
+          {
+            "name": "include_stream_urls",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Incluir stream URLs y mejores thumbnails para tracks",
+              "default": true,
+              "title": "Include Stream Urls"
+            },
+            "description": "Incluir stream URLs y mejores thumbnails para tracks"
+          },
+          {
+            "name": "prefetch_count",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": -1,
+              "description": "Número de URLs a obtener en paralelo (0 = none, -1 = todas)",
+              "default": 10,
+              "title": "Prefetch Count"
+            },
+            "description": "Número de URLs a obtener en paralelo (0 = none, -1 = todas)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Playlist obtenida exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Playlist Api V1 Playlists  Playlist Id  Get"
+                },
+                "example": {
+                  "title": "Playlist Title",
+                  "trackCount": 50,
+                  "tracks": [
+                    {
+                      "videoId": "rMbATaj7Il8",
+                      "title": "Track Title",
+                      "artists": [
+                        {
+                          "name": "Artist"
+                        }
+                      ],
+                      "stream_url": "https://...",
+                      "thumbnail": "https://..."
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/watch/": {
+      "get": {
+        "tags": [
+          "watch",
+          "watch"
+        ],
+        "summary": "Get watch playlist",
+        "description": "Obtiene la playlist de reproducción (siguientes canciones) basada en un video o playlist. Soporta radio y shuffle.",
+        "operationId": "get_watch_playlist_api_v1_watch__get",
+        "parameters": [
+          {
+            "name": "video_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ID del video para iniciar",
+              "examples": [
+                "rMbATaj7Il8"
+              ],
+              "title": "Video Id"
+            },
+            "description": "ID del video para iniciar"
+          },
+          {
+            "name": "playlist_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ID de la playlist",
+              "examples": [
+                "PL..."
+              ],
+              "title": "Playlist Id"
+            },
+            "description": "ID de la playlist"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Número de canciones",
+              "examples": [
+                25
+              ],
+              "default": 25,
+              "title": "Limit"
+            },
+            "description": "Número de canciones"
+          },
+          {
+            "name": "start_index",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Índice inicial para paginación",
+              "default": 0,
+              "title": "Start Index"
+            },
+            "description": "Índice inicial para paginación"
+          },
+          {
+            "name": "radio",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Obtener playlist de radio",
+              "default": false,
+              "title": "Radio"
+            },
+            "description": "Obtener playlist de radio"
+          },
+          {
+            "name": "shuffle",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Obtener playlist en modo shuffle",
+              "default": false,
+              "title": "Shuffle"
+            },
+            "description": "Obtener playlist en modo shuffle"
+          },
+          {
+            "name": "include_stream_urls",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Incluir stream URLs y mejores thumbnails para tracks",
+              "default": false,
+              "title": "Include Stream Urls"
+            },
+            "description": "Incluir stream URLs y mejores thumbnails para tracks"
+          },
+          {
+            "name": "prefetch_count",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": -1,
+              "description": "Número de URLs a obtener en paralelo (0 = none, -1 = todas)",
+              "default": 10,
+              "title": "Prefetch Count"
+            },
+            "description": "Número de URLs a obtener en paralelo (0 = none, -1 = todas)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Playlist obtenida exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Watch Playlist Api V1 Watch  Get"
+                },
+                "example": {
+                  "tracks": [
+                    {
+                      "videoId": "rMbATaj7Il8",
+                      "title": "Next Song",
+                      "stream_url": "https://...",
+                      "thumbnail": "https://..."
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Se requiere video_id o playlist_id"
+          },
+          "500": {
+            "description": "Error interno"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/podcasts/channel/{channel_id}": {
+      "get": {
+        "tags": [
+          "podcasts",
+          "podcasts"
+        ],
+        "summary": "Get podcast channel",
+        "description": "Obtiene información de un canal de podcast.",
+        "operationId": "get_channel_api_v1_podcasts_channel__channel_id__get",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ID del canal",
+              "examples": {
+                "example1": {
+                  "value": "UC..."
+                }
+              },
+              "title": "Channel Id"
+            },
+            "description": "ID del canal"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Límite de resultados",
+              "examples": [
+                25
+              ],
+              "default": 25,
+              "title": "Limit"
+            },
+            "description": "Límite de resultados"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Canal obtenido exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Channel Api V1 Podcasts Channel  Channel Id  Get"
+                },
+                "example": {
+                  "id": "UC...",
+                  "title": "Podcast Channel Name",
+                  "description": "Descripción del canal de podcast",
+                  "thumbnails": [
+                    {
+                      "url": "https://i.ytimg.com/vi/.../hqdefault.jpg",
+                      "width": 480,
+                      "height": 360
+                    }
+                  ],
+                  "subscriberCount": "100000",
+                  "videoCount": 50
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/podcasts/channel/{channel_id}/episodes": {
+      "get": {
+        "tags": [
+          "podcasts",
+          "podcasts"
+        ],
+        "summary": "Get channel episodes",
+        "description": "Obtiene los episodios de un canal de podcast.",
+        "operationId": "get_channel_episodes_api_v1_podcasts_channel__channel_id__episodes_get",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ID del canal",
+              "examples": {
+                "example1": {
+                  "value": "UC..."
+                }
+              },
+              "title": "Channel Id"
+            },
+            "description": "ID del canal"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Límite de episodios",
+              "examples": [
+                25
+              ],
+              "default": 25,
+              "title": "Limit"
+            },
+            "description": "Límite de episodios"
+          },
+          {
+            "name": "params",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Parámetros de paginación",
+              "title": "Params"
+            },
+            "description": "Parámetros de paginación"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Episodios obtenidos exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Channel Episodes Api V1 Podcasts Channel  Channel Id  Episodes Get"
+                },
+                "example": {
+                  "episodes": [
+                    {
+                      "browseId": "VL...",
+                      "title": "Episode Title",
+                      "description": "Episode description",
+                      "lengthSeconds": "3600",
+                      "publishedTime": "2 years ago",
+                      "thumbnail": [
+                        {
+                          "url": "https://i.ytimg.com/vi/.../hqdefault.jpg",
+                          "width": 480,
+                          "height": 360
+                        }
+                      ]
+                    }
+                  ],
+                  "continuation": "nextPageToken..."
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/podcasts/{browse_id}": {
+      "get": {
+        "tags": [
+          "podcasts",
+          "podcasts"
+        ],
+        "summary": "Get podcast",
+        "description": "Obtiene información de un podcast específico.",
+        "operationId": "get_podcast_api_v1_podcasts__browse_id__get",
+        "parameters": [
+          {
+            "name": "browse_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Browse ID del podcast",
+              "examples": {
+                "example1": {
+                  "value": "MPAD..."
+                }
+              },
+              "title": "Browse Id"
+            },
+            "description": "Browse ID del podcast"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Límite de episodios",
+              "examples": [
+                25
+              ],
+              "default": 25,
+              "title": "Limit"
+            },
+            "description": "Límite de episodios"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Podcast obtenido exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Podcast Api V1 Podcasts  Browse Id  Get"
+                },
+                "example": {
+                  "browseId": "MPAD...",
+                  "title": "Podcast Title",
+                  "description": "Podcast description",
+                  "author": "Podcast Author",
+                  "thumbnail": [
+                    {
+                      "url": "https://i.ytimg.com/vi/.../hqdefault.jpg",
+                      "width": 480,
+                      "height": 360
+                    }
+                  ],
+                  "episodes": [
+                    {
+                      "browseId": "VLE...",
+                      "title": "Episode Title",
+                      "description": "Episode description",
+                      "lengthSeconds": "3600",
+                      "publishedTime": "2 years ago"
+                    }
+                  ],
+                  "albums": []
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/podcasts/episode/{browse_id}": {
+      "get": {
+        "tags": [
+          "podcasts",
+          "podcasts"
+        ],
+        "summary": "Get podcast episode",
+        "description": "Obtiene información de un episodio específico de podcast.",
+        "operationId": "get_episode_api_v1_podcasts_episode__browse_id__get",
+        "parameters": [
+          {
+            "name": "browse_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Browse ID del episodio",
+              "examples": {
+                "example1": {
+                  "value": "MPAD..."
+                }
+              },
+              "title": "Browse Id"
+            },
+            "description": "Browse ID del episodio"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Episodio obtenido exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Episode Api V1 Podcasts Episode  Browse Id  Get"
+                },
+                "example": {
+                  "browseId": "VLE...",
+                  "title": "Episode Title",
+                  "description": "Episode description",
+                  "author": "Podcast Author",
+                  "lengthSeconds": "3600",
+                  "publishedTime": "2 years ago",
+                  "thumbnail": [
+                    {
+                      "url": "https://i.ytimg.com/vi/.../hqdefault.jpg",
+                      "width": 480,
+                      "height": 360
+                    }
+                  ],
+                  "views": "100000",
+                  "likes": "5000",
+                  "isAvailable": true,
+                  "isExplicit": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/podcasts/episodes/{browse_id}/playlist": {
+      "get": {
+        "tags": [
+          "podcasts",
+          "podcasts"
+        ],
+        "summary": "Get episodes playlist",
+        "description": "Obtiene la playlist de episodios de un podcast.",
+        "operationId": "get_episodes_playlist_api_v1_podcasts_episodes__browse_id__playlist_get",
+        "parameters": [
+          {
+            "name": "browse_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Browse ID del podcast",
+              "examples": {
+                "example1": {
+                  "value": "MPAD..."
+                }
+              },
+              "title": "Browse Id"
+            },
+            "description": "Browse ID del podcast"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Límite de episodios",
+              "examples": [
+                25
+              ],
+              "default": 25,
+              "title": "Limit"
+            },
+            "description": "Límite de episodios"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Playlist obtenida exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Episodes Playlist Api V1 Podcasts Episodes  Browse Id  Playlist Get"
+                },
+                "example": {
+                  "title": "Podcast Playlist",
+                  "description": "Episodios del podcast",
+                  "trackCount": 10,
+                  "tracks": [
+                    {
+                      "videoId": "abc123",
+                      "title": "Episode Title",
+                      "artists": [
+                        {
+                          "name": "Podcast Author"
+                        }
+                      ],
+                      "album": {
+                        "name": "Podcast Name"
+                      },
+                      "duration": "3600",
+                      "isExplicit": false,
+                      "stream_url": "https://...",
+                      "thumbnail": [
+                        {
+                          "url": "https://i.ytimg.com/vi/.../hqdefault.jpg",
+                          "width": 480,
+                          "height": 360
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/uploads/": {
+      "get": {
+        "tags": [
+          "uploads",
+          "uploads"
+        ],
+        "summary": "Uploads information",
+        "description": "Información sobre endpoints de uploads. Los endpoints de uploads requieren autenticación de usuario.",
+        "operationId": "uploads_info_api_v1_uploads__get",
+        "responses": {
+          "200": {
+            "description": "Información y endpoints públicos alternativos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Uploads Info Api V1 Uploads  Get"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Endpoint no implementado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "NOT_IMPLEMENTED",
+                  "message": "Upload endpoints are not implemented in this version. Use /api/v1/explore for public content."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stream/proxy/{video_id}": {
+      "get": {
+        "tags": [
+          "stream",
+          "stream"
+        ],
+        "summary": "Proxy de streaming de audio",
+        "description": "Endpoint de streaming de audio que evita problemas de CORS. El backend hace proxy del audio de YouTube.",
+        "operationId": "proxy_stream_audio_api_v1_stream_proxy__video_id__get",
+        "parameters": [
+          {
+            "name": "video_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ID del video de YouTube",
+              "title": "Video Id"
+            },
+            "description": "ID del video de YouTube"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream de audio",
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "audio/mpeg": {},
+              "audio/mp4": {},
+              "audio/*": {}
+            }
+          },
+          "404": {
+            "description": "Audio no encontrado"
+          },
+          "500": {
+            "description": "Error al obtener stream"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stream/batch": {
+      "get": {
+        "tags": [
+          "stream",
+          "stream"
+        ],
+        "summary": "Get multiple stream URLs",
+        "description": "Obtiene URLs de stream para múltiples videos. Usa MGET de Redis para optimizar cache como playlists.",
+        "operationId": "get_batch_stream_urls_api_v1_stream_batch_get",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Lista de IDs separada por comas (máximo 50)",
+              "title": "Ids"
+            },
+            "description": "Lista de IDs separada por comas (máximo 50)"
+          },
+          {
+            "name": "bypass_cache",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Si true, ignora cache y obtiene URLs frescas de YouTube",
+              "default": false,
+              "title": "Bypass Cache"
+            },
+            "description": "Si true, ignora cache y obtiene URLs frescas de YouTube"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream URLs obtenidas exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Batch Stream Urls Api V1 Stream Batch Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Error de validación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Error de validación en 'video_id': ID de video inválido. Debe tener exactamente 11 caracteres.",
+                  "details": {
+                    "field": "video_id",
+                    "reason": "invalid_length",
+                    "expected_length": 11,
+                    "actual_length": 5
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Error de autenticación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "AUTHENTICATION_ERROR",
+                  "message": "Error de autenticación con YouTube Music. Verifica las credenciales.",
+                  "details": {
+                    "operation": "search",
+                    "hint": "Check server logs for details"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found - Recurso no encontrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "NOT_FOUND",
+                  "message": "Video no encontrado.",
+                  "details": {
+                    "resource_type": "video",
+                    "resource_id": "rMbATaj7Il8"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit excedido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "RATE_LIMIT_ERROR",
+                  "message": "Límite de peticiones excedido. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "retry_after": 300
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "INTERNAL_ERROR",
+                  "message": "Ha ocurrido un error interno. Por favor intenta más tarde."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway - Error de servicio externo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "EXTERNAL_SERVICE_ERROR",
+                  "message": "Error en YouTube Music durante get_stream. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "service": "YouTube Music"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable - Servicio no disponible",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "SERVICE_UNAVAILABLE",
+                  "message": "Servicio temporalmente no disponible debido a sobrecarga.",
+                  "details": {
+                    "retry_after": 180,
+                    "state": "OPEN"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stream/cache/stats": {
+      "get": {
+        "tags": [
+          "stream",
+          "stream"
+        ],
+        "summary": "Get cache statistics",
+        "description": "Muestra estadísticas del cache de Redis.",
+        "operationId": "get_stream_cache_stats_api_v1_stream_cache_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Stream Cache Stats Api V1 Stream Cache Stats Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stream/cache": {
+      "delete": {
+        "tags": [
+          "stream",
+          "stream"
+        ],
+        "summary": "Clear all stream cache",
+        "description": "Limpia todo el cache de streams.",
+        "operationId": "clear_all_stream_cache_api_v1_stream_cache_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Clear All Stream Cache Api V1 Stream Cache Delete"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stream/cache/info/{video_id}": {
+      "get": {
+        "tags": [
+          "stream",
+          "stream"
+        ],
+        "summary": "Check cached stream URL for a video",
+        "description": "Verifica si hay una URL de stream cached para un video y muestra info.",
+        "operationId": "get_stream_cache_info_api_v1_stream_cache_info__video_id__get",
+        "parameters": [
+          {
+            "name": "video_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ID del video",
+              "title": "Video Id"
+            },
+            "description": "ID del video"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Stream Cache Info Api V1 Stream Cache Info  Video Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stream/cache/{video_id}": {
+      "delete": {
+        "tags": [
+          "stream",
+          "stream"
+        ],
+        "summary": "Delete cached stream URL for a video",
+        "description": "Elimina la URL de stream cached para un video específico.",
+        "operationId": "delete_stream_cache_api_v1_stream_cache__video_id__delete",
+        "parameters": [
+          {
+            "name": "video_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ID del video",
+              "title": "Video Id"
+            },
+            "description": "ID del video"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Stream Cache Api V1 Stream Cache  Video Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stream/status/{video_id}": {
+      "get": {
+        "tags": [
+          "stream",
+          "stream"
+        ],
+        "summary": "Check if stream URL is cached",
+        "description": "Verifica si la URL de stream está en cache sin hacer llamada a YouTube.",
+        "operationId": "get_stream_cache_status_api_v1_stream_status__video_id__get",
+        "parameters": [
+          {
+            "name": "video_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ID del video",
+              "title": "Video Id"
+            },
+            "description": "ID del video"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Estado del cache",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Stream Cache Status Api V1 Stream Status  Video Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stream/{video_id}": {
+      "get": {
+        "tags": [
+          "stream",
+          "stream"
+        ],
+        "summary": "Get audio stream URL",
+        "description": "Obtiene la URL directa de stream de audio de una canción usando yt-dlp. Incluye caché inteligente y circuit breaker.",
+        "operationId": "get_stream_url_api_v1_stream__video_id__get",
+        "parameters": [
+          {
+            "name": "video_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ID del video/canción",
+              "title": "Video Id"
+            },
+            "description": "ID del video/canción"
+          },
+          {
+            "name": "bypass_cache",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Si true, ignora la caché y genera una URL fresca",
+              "default": false,
+              "title": "Bypass Cache"
+            },
+            "description": "Si true, ignora la caché y genera una URL fresca"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stream URL obtenida exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Stream Url Api V1 Stream  Video Id  Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request - Error de validación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "VALIDATION_ERROR",
+                  "message": "Error de validación en 'video_id': ID de video inválido. Debe tener exactamente 11 caracteres.",
+                  "details": {
+                    "field": "video_id",
+                    "reason": "invalid_length",
+                    "expected_length": 11,
+                    "actual_length": 5
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Error de autenticación",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "AUTHENTICATION_ERROR",
+                  "message": "Error de autenticación con YouTube Music. Verifica las credenciales.",
+                  "details": {
+                    "operation": "search",
+                    "hint": "Check server logs for details"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found - Recurso no encontrado",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "NOT_FOUND",
+                  "message": "Video no encontrado.",
+                  "details": {
+                    "resource_type": "video",
+                    "resource_id": "rMbATaj7Il8"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests - Rate limit excedido",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "RATE_LIMIT_ERROR",
+                  "message": "Límite de peticiones excedido. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "retry_after": 300
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "INTERNAL_ERROR",
+                  "message": "Ha ocurrido un error interno. Por favor intenta más tarde."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Bad Gateway - Error de servicio externo",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "EXTERNAL_SERVICE_ERROR",
+                  "message": "Error en YouTube Music durante get_stream. Intenta más tarde.",
+                  "details": {
+                    "operation": "get_stream",
+                    "service": "YouTube Music"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable - Servicio no disponible",
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": true,
+                  "error_code": "SERVICE_UNAVAILABLE",
+                  "message": "Servicio temporalmente no disponible debido a sobrecarga.",
+                  "details": {
+                    "retry_after": 180,
+                    "state": "OPEN"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stats/stats": {
+      "get": {
+        "tags": [
+          "stats",
+          "stats"
+        ],
+        "summary": "Get service statistics",
+        "description": "Obtiene estadísticas del servicio: rate limiting, caché, circuit breaker y rendimiento.",
+        "operationId": "get_stats_api_v1_stats_stats_get",
+        "responses": {
+          "200": {
+            "description": "Estadísticas obtenidas exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Stats Api V1 Stats Stats Get"
+                },
+                "example": {
+                  "service": "YouTube Music Service",
+                  "version": "1.0.0",
+                  "rate_limiting": {
+                    "enabled": true,
+                    "limit_per_minute": 60,
+                    "limit_per_hour": 1000
+                  },
+                  "caching": {
+                    "enabled": true,
+                    "size": 150,
+                    "max_size": 1000,
+                    "ttl": 300
+                  },
+                  "circuit_breaker": {
+                    "youtube_stream": {
+                      "state": "CLOSED",
+                      "failure_count": 0,
+                      "remaining_time_seconds": 0
+                    }
+                  },
+                  "performance": {
+                    "compression": true,
+                    "http_timeout": 30,
+                    "max_workers": 10
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "tags": [
+          "general"
+        ],
+        "summary": "Root endpoint",
+        "description": "Endpoint raíz con información del servicio y enlaces a documentación.",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Servicio online",
+            "content": {
+              "application/json": {
+                "schema": {},
+                "example": {
+                  "status": "online",
+                  "service": "YouTube Music Service",
+                  "version": "1.0.0",
+                  "auth": "OAuth",
+                  "docs": "/docs",
+                  "api": "/api/v1"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "general"
+        ],
+        "summary": "Health check",
+        "description": "Verifica el estado de salud del servicio. Usado por sistemas de monitoreo y Docker health checks.",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Servicio saludable",
+            "content": {
+              "application/json": {
+                "schema": {},
+                "example": {
+                  "status": "healthy"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AlbumResponse": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Album title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Album description"
+          },
+          "artists": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artists",
+            "description": "List of artists"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year",
+            "description": "Release year"
+          },
+          "track_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Track Count",
+            "description": "Number of tracks"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration",
+            "description": "Total duration"
+          },
+          "thumbnails": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnails",
+            "description": "Album thumbnails"
+          },
+          "tracks": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AlbumTrack"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracks",
+            "description": "List of tracks"
+          },
+          "audio_playlist_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Playlist Id",
+            "description": "Audio playlist ID"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "AlbumResponse",
+        "description": "Response for album endpoint."
+      },
+      "AlbumTrack": {
+        "properties": {
+          "video_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Id",
+            "description": "Video ID"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Track title"
+          },
+          "artists": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artists",
+            "description": "List of artists"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration",
+            "description": "Duration"
+          },
+          "thumbnails": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnails",
+            "description": "Thumbnails"
+          },
+          "thumbnail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail",
+            "description": "Best quality thumbnail URL"
+          },
+          "stream_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Url",
+            "description": "Direct audio stream URL"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "AlbumTrack",
+        "description": "A track in an album."
+      },
+      "ArtistAlbumsResponse": {
+        "properties": {
+          "results": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Results",
+            "description": "List of albums"
+          },
+          "browse_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Browse Id",
+            "description": "Browse ID"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "ArtistAlbumsResponse",
+        "description": "Response for artist albums endpoint."
+      },
+      "AuthStatusResponse": {
+        "properties": {
+          "authenticated": {
+            "type": "boolean",
+            "title": "Authenticated",
+            "description": "Whether the YTMusic client is authenticated"
+          },
+          "has_credentials": {
+            "type": "boolean",
+            "title": "Has Credentials",
+            "description": "Whether OAuth credentials are stored in Redis"
+          },
+          "has_token": {
+            "type": "boolean",
+            "title": "Has Token",
+            "description": "Whether oauth.json exists"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "description": "Authentication method",
+            "default": "oauth"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authenticated",
+          "has_credentials",
+          "has_token"
+        ],
+        "title": "AuthStatusResponse",
+        "description": "Response for authentication status check."
+      },
+      "CredentialsRequest": {
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "minLength": 10,
+            "title": "Client Id",
+            "description": "Google OAuth Client ID",
+            "examples": [
+              "188268615112-cdgjboq41lii1fdmbkl8ve2f96vqc059.apps.googleusercontent.com"
+            ]
+          },
+          "client_secret": {
+            "type": "string",
+            "minLength": 10,
+            "title": "Client Secret",
+            "description": "Google OAuth Client Secret",
+            "examples": [
+              "GOCSPX-xxxxxxxxxxxxxxxxx"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "client_id",
+          "client_secret"
+        ],
+        "title": "CredentialsRequest",
+        "description": "Request body for saving OAuth credentials."
+      },
+      "CredentialsResponse": {
+        "properties": {
+          "has_credentials": {
+            "type": "boolean",
+            "title": "Has Credentials",
+            "description": "Whether OAuth credentials are stored"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At",
+            "description": "ISO timestamp of last credential update"
+          }
+        },
+        "type": "object",
+        "required": [
+          "has_credentials"
+        ],
+        "title": "CredentialsResponse",
+        "description": "Response for credential status."
+      },
+      "ErrorDetailItem": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field",
+            "description": "Field that caused the error",
+            "examples": [
+              "query",
+              "video_id",
+              "limit"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable error message",
+            "examples": [
+              "campo requerido",
+              "valor inválido"
+            ]
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type",
+            "description": "Error type identifier",
+            "examples": [
+              "value_error.missing",
+              "type_error.integer"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "message"
+        ],
+        "title": "ErrorDetailItem",
+        "description": "Single error detail item for validation errors."
+      },
+      "ErrorDetails": {
+        "properties": {
+          "errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ErrorDetailItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errors",
+            "description": "List of individual errors (for validation errors)"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count",
+            "description": "Number of errors"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation",
+            "description": "Operation that caused the error"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field",
+            "description": "Field that caused the error"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Reason for the error"
+          },
+          "retry_after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After",
+            "description": "Seconds to wait before retrying"
+          },
+          "resource_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Type",
+            "description": "Type of resource that was not found"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id",
+            "description": "ID of resource that was not found"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State",
+            "description": "State (e.g., circuit breaker state)",
+            "examples": [
+              "OPEN",
+              "CLOSED",
+              "HALF_OPEN"
+            ]
+          },
+          "hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint",
+            "description": "Hint for resolving the error"
+          }
+        },
+        "type": "object",
+        "title": "ErrorDetails",
+        "description": "Container for error details."
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "type": "boolean",
+            "title": "Error",
+            "description": "Always True for error responses",
+            "default": true
+          },
+          "error_code": {
+            "type": "string",
+            "title": "Error Code",
+            "description": "Machine-readable error code",
+            "examples": [
+              "VALIDATION_ERROR",
+              "AUTHENTICATION_ERROR",
+              "RATE_LIMIT_ERROR",
+              "NOT_FOUND",
+              "EXTERNAL_SERVICE_ERROR",
+              "SERVICE_UNAVAILABLE",
+              "INTERNAL_ERROR"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable error message in Spanish",
+            "examples": [
+              "Error de validación en los parámetros de la petición",
+              "Error de autenticación con YouTube Music",
+              "Límite de peticiones excedido. Intenta más tarde.",
+              "Recurso no encontrado",
+              "Error en el servicio de YouTube Music",
+              "Servicio temporalmente no disponible"
+            ]
+          },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Additional error details (structure varies by error type)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error_code",
+          "message"
+        ],
+        "title": "ErrorResponse",
+        "description": "Standard error response schema for all API errors.\n\nThis schema is used consistently across all endpoints to provide\na predictable error format for clients.\n\nAttributes:\n    error: Always True for error responses.\n    error_code: Machine-readable error code for programmatic handling.\n    message: Human-readable error message in Spanish.\n    details: Optional additional details about the error."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HomeResponse": {
+        "properties": {},
+        "additionalProperties": true,
+        "type": "object",
+        "title": "HomeResponse",
+        "description": "Response for home endpoint."
+      },
+      "OAuthPollRequest": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Session Id",
+            "description": "Session ID from /auth/oauth/start"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "OAuthPollRequest",
+        "description": "Request body for polling OAuth authorization."
+      },
+      "OAuthStartResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Session ID for polling"
+          },
+          "verification_url": {
+            "type": "string",
+            "title": "Verification Url",
+            "description": "URL for user authorization",
+            "examples": [
+              "https://www.google.com/device"
+            ]
+          },
+          "user_code": {
+            "type": "string",
+            "title": "User Code",
+            "description": "Code to enter at verification URL",
+            "examples": [
+              "XXXX-XXXX"
+            ]
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In",
+            "description": "Seconds until session expires",
+            "examples": [
+              900
+            ]
+          },
+          "interval": {
+            "type": "integer",
+            "title": "Interval",
+            "description": "Recommended polling interval in seconds",
+            "examples": [
+              5
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "verification_url",
+          "user_code",
+          "expires_in",
+          "interval"
+        ],
+        "title": "OAuthStartResponse",
+        "description": "Response for starting the OAuth device flow."
+      },
+      "SongResponse": {
+        "properties": {
+          "video_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Id",
+            "description": "Video ID"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Song title"
+          },
+          "artists": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artists",
+            "description": "List of artists"
+          },
+          "album": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Album",
+            "description": "Album information"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration",
+            "description": "Duration"
+          },
+          "thumbnails": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnails",
+            "description": "Thumbnails"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "SongResponse",
+        "description": "Response for song endpoint."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}
