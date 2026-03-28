@@ -17,6 +17,14 @@ from app.core.cache_redis import (
     get_cache_stats,
 )
 from app.schemas.errors import COMMON_ERROR_RESPONSES
+from app.schemas.stream import StreamUrlResponse, StreamBatchResponse
+from app.schemas.stream_management import (
+    CacheStatsResponse,
+    CacheClearResponse,
+    CacheInfoResponse,
+    CacheDeleteResponse,
+    StreamCacheStatusResponse,
+)
 
 router = APIRouter(tags=["stream"])
 logger = logging.getLogger(__name__)
@@ -142,6 +150,7 @@ async def proxy_stream_audio(
     summary="Get multiple stream URLs",
     description="Obtiene URLs de stream para múltiples videos. Usa MGET de Redis para optimizar cache como playlists.",
     response_description="Lista de URLs de stream con metadatos",
+    response_model=StreamBatchResponse,
     responses={
         200: {
             "description": "Stream URLs obtenidas exitosamente",
@@ -155,19 +164,7 @@ async def get_batch_stream_urls(
     bypass_cache: bool = Query(False, description="Si true, ignora cache y obtiene URLs frescas de YouTube"),
     service: StreamService = Depends(get_stream_service)
 ) -> Dict[str, Any]:
-    """
-    Obtiene URLs de stream para múltiples videos a la vez.
-    Usa el mismo patrón de enriquecimiento que playlists:
-    - MGET de Redis para verificar cache en una sola llamada
-    - Solo fetch de YouTube los que no están en cache
-    - parallel para mejor rendimiento
-    
-    **Ejemplo:**
-    `/stream/batch?ids=dQw4w9WgXcQ,9bZkp7q19f0,kJQP7kiw5Fk`
-    
-    **Con bypass de cache ( URLs frescas):**
-    `/stream/batch?ids=dQw4w9WgXcQ,9bZkp7q19f0&bypass_cache=true`
-    """
+    """Returns a dict with results and summary - using Dict[str, Any] for flexibility."""
     video_id_list = [vid.strip() for vid in video_ids.split(',') if vid.strip()]
     
     if not video_id_list:
@@ -226,33 +223,37 @@ async def get_batch_stream_urls(
 
 @router.get(
     "/cache/stats",
+    response_model=CacheStatsResponse,
     summary="Get cache statistics",
     description="Muestra estadísticas del cache de Redis.",
 )
-async def get_stream_cache_stats() -> Dict[str, Any]:
+async def get_stream_cache_stats() -> CacheStatsResponse:
     """Muestra estadísticas del cache."""
-    return await get_cache_stats()
+    stats = await get_cache_stats()
+    return CacheStatsResponse(**stats)
 
 
 @router.delete(
     "/cache",
+    response_model=CacheClearResponse,
     summary="Clear all stream cache",
     description="Limpia todo el cache de streams.",
 )
-async def clear_all_stream_cache() -> Dict[str, Any]:
+async def clear_all_stream_cache() -> CacheClearResponse:
     """Limpia todo el cache de streams."""
     await clear_cache("music:stream")
-    return {"status": "cleared", "pattern": "music:stream"}
+    return CacheClearResponse(status="cleared", pattern="music:stream")
 
 
 @router.get(
     "/cache/info/{video_id}",
+    response_model=CacheInfoResponse,
     summary="Check cached stream URL for a video",
     description="Verifica si hay una URL de stream cached para un video y muestra info.",
 )
 async def get_stream_cache_info(
     video_id: str = Path(..., description="ID del video"),
-) -> Dict[str, Any]:
+) -> CacheInfoResponse:
     """Muestra información del cache para un video."""
     validate_video_id(video_id)
     
@@ -268,9 +269,9 @@ async def get_stream_cache_info(
     metadata_cached = await get_cached_value(metadata_key) if metadata_exists else None
     url_cached = await get_cached_value(stream_url_key) if url_exists else None
     
-    return {
-        "videoId": video_id,
-        "cached": {
+    return CacheInfoResponse(
+        videoId=video_id,
+        cached={
             "metadata": metadata_exists,
             "metadata_timestamp": metadata_timestamp,
             "metadata_value": metadata_cached,
@@ -278,17 +279,18 @@ async def get_stream_cache_info(
             "url_timestamp": url_timestamp,
             "url_value": url_cached[:200] + "..." if url_cached and len(url_cached) > 200 else url_cached
         }
-    }
+    )
 
 
 @router.delete(
     "/cache/{video_id}",
+    response_model=CacheDeleteResponse,
     summary="Delete cached stream URL for a video",
     description="Elimina la URL de stream cached para un video específico.",
 )
 async def delete_stream_cache(
     video_id: str = Path(..., description="ID del video"),
-) -> Dict[str, Any]:
+) -> CacheDeleteResponse:
     """Elimina el cache de un video específico."""
     validate_video_id(video_id)
     
@@ -299,13 +301,13 @@ async def delete_stream_cache(
     deleted_metadata = await delete_cached_key(metadata_key)
     deleted_url = await delete_cached_key(stream_url_key)
     
-    return {
-        "videoId": video_id,
-        "deleted": {
+    return CacheDeleteResponse(
+        videoId=video_id,
+        deleted={
             "metadata": deleted_metadata,
             "stream_url": deleted_url
         }
-    }
+    )
 
 
 # ============================================
@@ -314,6 +316,7 @@ async def delete_stream_cache(
 
 @router.get(
     "/status/{video_id}",
+    response_model=StreamCacheStatusResponse,
     summary="Check if stream URL is cached",
     description="Verifica si la URL de stream está en cache sin hacer llamada a YouTube.",
     response_description="Estado del cache"
@@ -321,7 +324,7 @@ async def delete_stream_cache(
 async def get_stream_cache_status(
     video_id: str = Path(..., description="ID del video"),
     service: StreamService = Depends(get_stream_service)
-) -> Dict[str, Any]:
+) -> StreamCacheStatusResponse:
     """
     Verifica el estado del cache para un video.
     """
@@ -330,11 +333,11 @@ async def get_stream_cache_status(
     is_cached = await service.is_cached(video_id)
     ttl_remaining = await service.get_cache_ttl(video_id) if is_cached else 0
     
-    return {
-        "videoId": video_id,
-        "cached": is_cached,
-        "expiresIn": ttl_remaining
-    }
+    return StreamCacheStatusResponse(
+        videoId=video_id,
+        cached=is_cached,
+        expiresIn=ttl_remaining
+    )
 
 
 # ============================================
@@ -343,6 +346,7 @@ async def get_stream_cache_status(
 
 @router.get(
     "/{video_id}",
+    response_model=StreamUrlResponse,
     summary="Get audio stream URL",
     description="Obtiene la URL directa de stream de audio de una canción usando yt-dlp. Incluye caché inteligente y circuit breaker.",
     response_description="URL de stream y metadatos",
@@ -357,9 +361,10 @@ async def get_stream_url(
     video_id: str = Path(..., description="ID del video/canción"),
     bypass_cache: bool = Query(False, description="Si true, ignora la caché y genera una URL fresca"),
     service: StreamService = Depends(get_stream_service)
-) -> Dict[str, Any]:
+) -> StreamUrlResponse:
     """
     Obtiene la URL directa de stream de audio de una canción.
     """
     validate_video_id(video_id)
-    return await service.get_stream_url(video_id, bypass_cache=bypass_cache)
+    result = await service.get_stream_url(video_id, bypass_cache=bypass_cache)
+    return StreamUrlResponse(**result)

@@ -1,4 +1,5 @@
 """Explore endpoints - Public content: charts, moods, genres."""
+from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
 from typing import Optional, Dict, Any, List
 from ytmusicapi import YTMusic
@@ -63,7 +64,7 @@ def get_explore_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> ExploreServi
 
 @router.get(
     "/",
-    response_model=Dict[str, Any],
+    response_model=ExploreResponse,
     summary="Get explore content",
     description="Obtiene contenido de exploración: moods, géneros, charts y home. Incluye top songs y trending con stream URLs opcionales.",
     response_description="Contenido de exploración con moods, géneros y charts",
@@ -93,7 +94,7 @@ def get_explore_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> ExploreServi
                 }
             }
         },
-        500: {"description": "Error interno del servidor"}
+        **COMMON_ERROR_RESPONSES
     }
 )
 async def explore_music(
@@ -119,7 +120,7 @@ async def explore_music(
         description="Número de URLs a obtener en paralelo (0=none, -1=todas)"
     ),
     service: ExploreService = Depends(get_explore_service)
-) -> Dict[str, Any]:
+) -> ExploreResponse:
     """
     Obtiene contenido completo de exploración.
     
@@ -257,7 +258,7 @@ async def explore_music(
 
 @router.get(
     "/moods",
-    response_model=Dict[str, Any],
+    response_model=MoodCategoriesResponse,
     summary="Get mood categories",
     description="Obtiene todas las categorías de moods y géneros disponibles en YouTube Music.",
     response_description="Categorías organizadas por secciones",
@@ -282,12 +283,12 @@ async def explore_music(
                 }
             }
         },
-        500: {"description": "Error interno del servidor"}
+        **COMMON_ERROR_RESPONSES
     }
 )
 async def get_mood_categories(
     service: ExploreService = Depends(get_explore_service)
-) -> Dict[str, Any]:
+) -> MoodCategoriesResponse:
     """
     Obtiene todas las categorías de moods y géneros.
     
@@ -314,7 +315,7 @@ async def get_mood_categories(
 
 @router.get(
     "/moods/{params}",
-    response_model=Dict[str, Any],
+    response_model=MoodPlaylistsResponse,
     summary="Get mood/genre playlists",
     description="Obtiene playlists de una categoría de mood o género usando sus parámetros codificados.",
     response_description="Lista de playlists de la categoría",
@@ -332,13 +333,13 @@ async def get_mood_categories(
             }
         },
         404: {"description": "Categoría no encontrada (params inválidos)"},
-        500: {"description": "Error interno del servidor"}
+        **COMMON_ERROR_RESPONSES
     }
 )
 async def get_mood_playlists(
     params: str = Path(..., description="Parámetros codificados de la categoría", examples={"example1": {"value": "ggMPOg1uX3hRRFdlaEhHU09k"}}),
     service: ExploreService = Depends(get_explore_service)
-) -> Dict[str, Any]:
+) -> MoodPlaylistsResponse:
     """
     Obtiene playlists de una categoría de mood o género.
     
@@ -358,7 +359,7 @@ async def get_mood_playlists(
 
 @router.get(
     "/charts",
-    response_model=Dict[str, Any],
+    response_model=ChartsResponse,
     summary="Get music charts",
     description="Obtiene los charts de YouTube Music: top songs y trending. Opcionalmente incluye stream URLs.",
     response_description="Charts con top songs y trending",
@@ -383,7 +384,7 @@ async def get_mood_playlists(
                 }
             }
         },
-        500: {"description": "Error interno del servidor"}
+        **COMMON_ERROR_RESPONSES
     }
 )
 async def get_charts(
@@ -396,7 +397,7 @@ async def get_charts(
         description="Incluir stream URLs y mejores thumbnails"
     ),
     service: ExploreService = Depends(get_explore_service)
-) -> Dict[str, Any]:
+) -> ChartsResponse:
     """
     Obtiene charts de YouTube Music.
     

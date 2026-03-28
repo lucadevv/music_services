@@ -30,8 +30,36 @@ class StreamEnrichedItem(BaseModel):
         extra = "allow"
 
 
+class BatchSummary(BaseModel):
+    """Summary of batch stream URL request."""
+    
+    total: int = Field(..., description="Total number of items processed")
+    cached: int = Field(..., description="Number of items served from cache")
+    fetched: int = Field(..., description="Number of items freshly fetched")
+    failed: int = Field(0, description="Number of items that failed")
+
+
+class BatchResultItem(BaseModel):
+    """Single item in batch response."""
+    
+    videoId: Optional[str] = Field(None, description="YouTube video ID")
+    url: Optional[str] = Field(None, description="Direct audio stream URL")
+    title: Optional[str] = Field(None, description="Song title")
+    artist: Optional[str] = Field(None, description="Artist name")
+    duration: Optional[Any] = Field(None, description="Duration")
+    thumbnail: Optional[str] = Field(None, description="Best quality thumbnail URL")
+    cached: bool = Field(False, description="Whether the URL was served from cache")
+    error: Optional[str] = Field(None, description="Error message if URL could not be obtained")
+    
+    class Config:
+        extra = "allow"
+
+
 class StreamBatchResponse(BaseModel):
     """Response for batch stream URL requests."""
     
-    items: List[StreamEnrichedItem] = Field(..., description="List of enriched items")
-    total: int = Field(..., description="Total number of items processed")
+    results: List[BatchResultItem] = Field(..., description="List of results with stream URLs")
+    summary: BatchSummary = Field(..., description="Batch processing summary")
+    
+    class Config:
+        extra = "allow"

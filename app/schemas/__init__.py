@@ -10,6 +10,7 @@ from app.schemas.search import (
     SearchResult,
     SearchResponse,
     SearchSuggestionsResponse,
+    RemoveSuggestionRequest,
 )
 from app.schemas.browse import (
     ArtistResponse,
@@ -18,11 +19,30 @@ from app.schemas.browse import (
     SongResponse,
     LyricsResponse,
     HomeResponse,
+    AlbumBrowseIdResponse,
+    RelatedSongsResponse,
+    RelatedSongItem,
 )
 from app.schemas.stream import (
     StreamUrlResponse,
     StreamEnrichedItem,
     StreamBatchResponse,
+)
+from app.schemas.stream_management import (
+    CacheStatsResponse,
+    CacheClearResponse,
+    CacheInfoResponse,
+    CacheDeleteResponse,
+    StreamCacheStatusResponse,
+)
+from app.schemas.stats import (
+    StatsResponse,
+    RateLimitingStats,
+    CachingStats,
+    CacheManagerStats,
+    CircuitBreakerState,
+    CircuitBreakerStats,
+    PerformanceStats,
 )
 from app.schemas.explore import (
     MoodCategory,
@@ -39,9 +59,11 @@ from app.schemas.podcast import (
     PodcastChannelResponse,
     PodcastEpisodeResponse,
     PodcastResponse,
+    PodcastEpisode,
 )
 from app.schemas.watch import (
     WatchPlaylistResponse,
+    WatchTrack,
 )
 from app.schemas.errors import (
     ErrorResponse,
@@ -61,6 +83,7 @@ __all__ = [
     "SearchResult",
     "SearchResponse",
     "SearchSuggestionsResponse",
+    "RemoveSuggestionRequest",
     # Browse
     "ArtistResponse",
     "ArtistAlbumsResponse",
@@ -68,10 +91,27 @@ __all__ = [
     "SongResponse",
     "LyricsResponse",
     "HomeResponse",
+    "AlbumBrowseIdResponse",
+    "RelatedSongsResponse",
+    "RelatedSongItem",
     # Stream
     "StreamUrlResponse",
     "StreamEnrichedItem",
     "StreamBatchResponse",
+    # Stream Management
+    "CacheStatsResponse",
+    "CacheClearResponse",
+    "CacheInfoResponse",
+    "CacheDeleteResponse",
+    "StreamCacheStatusResponse",
+    # Stats
+    "StatsResponse",
+    "RateLimitingStats",
+    "CachingStats",
+    "CacheManagerStats",
+    "CircuitBreakerState",
+    "CircuitBreakerStats",
+    "PerformanceStats",
     # Explore
     "MoodCategory",
     "MoodCategoriesResponse",
@@ -85,8 +125,10 @@ __all__ = [
     "PodcastChannelResponse",
     "PodcastEpisodeResponse",
     "PodcastResponse",
+    "PodcastEpisode",
     # Watch
     "WatchPlaylistResponse",
+    "WatchTrack",
     # Errors
     "ErrorResponse",
     "ErrorDetailItem",

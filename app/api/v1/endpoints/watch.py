@@ -45,7 +45,7 @@ def get_stream_service() -> StreamService:
 
 @router.get(
     "/",
-    response_model=Dict[str, Any],
+    response_model=WatchPlaylistResponse,
     summary="Get watch playlist",
     description="Obtiene la playlist de reproducción (siguientes canciones) basada en un video o playlist. Soporta radio y shuffle.",
     response_description="Playlist de reproducción con tracks",
@@ -68,7 +68,7 @@ def get_stream_service() -> StreamService:
             }
         },
         400: {"description": "Se requiere video_id o playlist_id"},
-        500: {"description": "Error interno"}
+        **COMMON_ERROR_RESPONSES
     }
 )
 async def get_watch_playlist(
@@ -90,7 +90,7 @@ async def get_watch_playlist(
     ),
     service: WatchService = Depends(get_watch_service),
     stream_service: StreamService = Depends(get_stream_service)
-) -> Dict[str, Any]:
+) -> WatchPlaylistResponse:
     """
     Obtiene la playlist de reproducción (siguientes canciones).
     

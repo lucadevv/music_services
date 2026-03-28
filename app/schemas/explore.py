@@ -1,6 +1,7 @@
 """Explore schemas for API responses."""
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from pydantic.config import ConfigDict
 
 
 class MoodCategory(BaseModel):
@@ -60,6 +61,10 @@ class ExploreResponse(BaseModel):
     home: List[Dict[str, Any]] = Field(default_factory=list, description="Home page content")
     charts: ChartsResponse = Field(..., description="Music charts")
     info: Optional[Dict[str, str]] = Field(None, description="Usage information")
+    stream_urls_prefetched: Optional[int] = Field(None, description="Number of tracks with prefetched stream URLs")
+    stream_urls_total: Optional[int] = Field(None, description="Total number of tracks")
+    
+    model_config = ConfigDict(extra="allow")
 
 
 class MoodPlaylist(BaseModel):

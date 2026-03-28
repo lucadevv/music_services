@@ -3,6 +3,9 @@ from fastapi import APIRouter
 from typing import Dict, Any
 import logging
 
+from app.schemas.stats import StatsResponse
+from app.schemas.errors import COMMON_ERROR_RESPONSES
+
 router = APIRouter(tags=["stats"])
 
 logger = logging.getLogger(__name__)
@@ -10,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 @router.get(
     "/stats",
-    response_model=Dict[str, Any],
+    response_model=StatsResponse,
     summary="Get service statistics",
     description="Obtiene estadísticas del servicio: rate limiting, caché, circuit breaker y rendimiento.",
     response_description="Estadísticas del servicio",
@@ -48,10 +51,11 @@ logger = logging.getLogger(__name__)
                     }
                 }
             }
-        }
+        },
+        **COMMON_ERROR_RESPONSES
     }
 )
-async def get_stats() -> Dict[str, Any]:
+async def get_stats() -> StatsResponse:
     """Obtiene estadísticas completas del servicio."""
     try:
         from app.core.config import get_settings
@@ -60,19 +64,19 @@ async def get_stats() -> Dict[str, Any]:
         from app.core.background_cache import cache_manager
     except Exception as e:
         logger.error(f"Failed to import required modules: {e}")
-        return {
-            "service": "YouTube Music Service",
-            "error": f"Configuration not available: {str(e)}"
-        }
+        return StatsResponse(
+            service="YouTube Music Service",
+            error=f"Configuration not available: {str(e)}"
+        )
 
     try:
         settings = get_settings()
     except Exception as e:
         logger.error(f"Failed to get settings: {e}")
-        return {
-            "service": "YouTube Music Service",
-            "error": f"Configuration not available: {str(e)}"
-        }
+        return StatsResponse(
+            service="YouTube Music Service",
+            error=f"Configuration not available: {str(e)}"
+        )
 
     try:
         cache_stats = await get_cache_stats()
@@ -92,22 +96,20 @@ async def get_stats() -> Dict[str, Any]:
         logger.warning(f"Failed to get cache manager metrics: {e}")
         cache_metrics = {"error": str(e)}
 
-    return {
-        "service": settings.PROJECT_NAME,
-        "version": settings.VERSION,
-        "rate_limiting": {
+    return StatsResponse(
+        service=settings.PROJECT_NAME,
+        version=settings.VERSION,
+        rate_limiting={
             "enabled": settings.RATE_LIMIT_ENABLED,
             "limit_per_minute": settings.RATE_LIMIT_PER_MINUTE,
             "limit_per_hour": settings.RATE_LIMIT_PER_HOUR
         },
-        "caching": cache_stats,
-        "cache_manager": cache_metrics,
-        "circuit_breaker": {
-            "youtube_stream": circuit_status
-        },
-        "performance": {
+        caching=cache_stats,
+        cache_manager=cache_metrics,
+        circuit_breaker={"youtube_stream": circuit_status},
+        performance={
             "compression": settings.ENABLE_COMPRESSION,
             "http_timeout": settings.HTTP_TIMEOUT,
             "max_workers": settings.MAX_WORKERS
         }
-    }
+    )

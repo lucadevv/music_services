@@ -45,13 +45,13 @@ class TestScrum37DeleteSuggestionsBody:
             headers={"Content-Type": "application/json"}
         )
         assert response.status_code == 200
-        assert response.json() == {"success": True}
+        assert response.json()["success"] is True
 
     def test_scrum37_query_param_success(self, client):
         """DELETE with query param should still work (deprecated)."""
         response = client.delete("/api/v1/search/suggestions?q=cumbia")
         assert response.status_code == 200
-        assert response.json() == {"success": True}
+        assert response.json()["success"] is True
 
     def test_scrum37_body_preferred_over_query(self, client):
         """When both body and query param provided, body takes precedence."""

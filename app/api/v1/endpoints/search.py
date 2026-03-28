@@ -8,6 +8,7 @@ from app.core.validators import validate_search_query, validate_search_filter
 from app.services.search_service import SearchService
 from app.services.stream_service import StreamService
 from app.schemas.search import SearchResponse, SearchSuggestionsResponse, RemoveSuggestionRequest
+from app.schemas.common import SuccessResponse
 from app.schemas.errors import COMMON_ERROR_RESPONSES
 
 router = APIRouter(tags=["search"])
@@ -25,7 +26,7 @@ def get_stream_service() -> StreamService:
 
 @router.get(
     "/",
-    response_model=Dict[str, Any],
+    response_model=SearchResponse,
     summary="Search music content",
     description="Busca contenido musical en YouTube Music: canciones, videos, álbumes, artistas y playlists.",
     response_description="Resultados de búsqueda",
@@ -70,7 +71,7 @@ async def search_music(
     ),
     service: SearchService = Depends(get_search_service),
     stream_service: StreamService = Depends(get_stream_service)
-) -> Dict[str, Any]:
+) -> SearchResponse:
     """
     Busca contenido musical en YouTube Music con paginación.
     
@@ -129,7 +130,7 @@ async def search_music(
 
 @router.get(
     "/suggestions",
-    response_model=Dict[str, Any],
+    response_model=SearchSuggestionsResponse,
     summary="Get search suggestions",
     description="Obtiene sugerencias de búsqueda basadas en el query parcial.",
     response_description="Lista de sugerencias",
@@ -150,7 +151,7 @@ async def search_music(
 async def get_search_suggestions(
     q: str = Query(..., description="Query parcial para obtener sugerencias", examples=["cumb"]),
     service: SearchService = Depends(get_search_service)
-) -> Dict[str, Any]:
+) -> SearchSuggestionsResponse:
     """
     Obtiene sugerencias de búsqueda para autocompletado.
     
@@ -160,12 +161,12 @@ async def get_search_suggestions(
     """
     q = validate_search_query(q)
     suggestions = await service.get_search_suggestions(q)
-    return {"suggestions": suggestions}
+    return SearchSuggestionsResponse(suggestions=suggestions)
 
 
 @router.delete(
     "/suggestions",
-    response_model=Dict[str, Any],
+    response_model=SuccessResponse,
     summary="Remove search suggestions",
     description="Elimina una sugerencia de búsqueda del historial.",
     response_description="Resultado de la eliminación",
@@ -185,7 +186,7 @@ async def remove_search_suggestions(
     body: Optional[Dict[str, Any]] = Body(None, description="Body con query a eliminar: {\"query\": \"test\"}"),
     q: Optional[str] = Query(None, description="(Deprecated) Query a eliminar. Usar body en su lugar.", examples=["cumbia"]),
     service: SearchService = Depends(get_search_service)
-) -> Dict[str, Any]:
+) -> SuccessResponse:
     """
     Elimina una sugerencia de búsqueda del historial.
     
@@ -210,4 +211,4 @@ async def remove_search_suggestions(
     
     # Remove suggestion - exceptions handled by global handlers
     result = await service.remove_search_suggestions(query)
-    return {"success": result}
+    return SuccessResponse(success=result)

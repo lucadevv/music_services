@@ -25,7 +25,7 @@ def get_stream_service() -> StreamService:
 
 @router.get(
     "/{playlist_id}",
-    response_model=Dict[str, Any],
+    response_model=PlaylistResponse,
     summary="Get playlist",
     description="Obtiene información completa de una playlist pública incluyendo todas sus canciones.",
     response_description="Información de la playlist con tracks",
@@ -50,7 +50,7 @@ def get_stream_service() -> StreamService:
                 }
             }
         },
-        500: {"description": "Error interno"}
+        **COMMON_ERROR_RESPONSES
     }
 )
 async def get_playlist(
@@ -71,7 +71,7 @@ async def get_playlist(
     ),
     service: PlaylistService = Depends(get_playlist_service),
     stream_service: StreamService = Depends(get_stream_service)
-) -> Dict[str, Any]:
+) -> PlaylistResponse:
     """
     Obtiene información completa de una playlist pública con paginación.
     

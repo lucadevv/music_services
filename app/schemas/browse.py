@@ -1,6 +1,7 @@
 """Browse schemas for API responses."""
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from pydantic.config import ConfigDict
 
 
 class HomeResponse(BaseModel):
@@ -93,3 +94,36 @@ class LyricsResponse(BaseModel):
     
     class Config:
         extra = "allow"
+
+
+class AlbumBrowseIdResponse(BaseModel):
+    """Response for album browse ID endpoint."""
+    
+    browse_id: str = Field(..., description="Album browse ID")
+    
+    model_config = ConfigDict(extra="allow")
+
+
+class RelatedSongItem(BaseModel):
+    """A related song item."""
+    
+    video_id: Optional[str] = Field(None, description="Video ID")
+    title: Optional[str] = Field(None, description="Song title")
+    artists: Optional[List[Dict[str, Any]]] = Field(None, description="List of artists")
+    album: Optional[Dict[str, Any]] = Field(None, description="Album information")
+    duration: Optional[str] = Field(None, description="Duration")
+    thumbnails: Optional[List[Dict[str, Any]]] = Field(None, description="Thumbnails")
+    thumbnail: Optional[str] = Field(None, description="Best quality thumbnail URL")
+    stream_url: Optional[str] = Field(None, description="Direct audio stream URL")
+    
+    class Config:
+        extra = "allow"
+
+
+class RelatedSongsResponse(BaseModel):
+    """Response for related songs endpoint."""
+    
+    songs: Optional[List[RelatedSongItem]] = Field(None, description="List of related songs")
+    count: Optional[int] = Field(None, description="Total number of songs")
+    
+    model_config = ConfigDict(extra="allow")

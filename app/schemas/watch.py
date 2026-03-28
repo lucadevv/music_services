@@ -1,6 +1,7 @@
 """Watch playlist schemas for API responses."""
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from pydantic.config import ConfigDict
 
 
 class WatchTrack(BaseModel):
@@ -26,6 +27,7 @@ class WatchPlaylistResponse(BaseModel):
     items: Optional[List[WatchTrack]] = Field(None, description="Alternative list of tracks")
     playlist_id: Optional[str] = Field(None, description="Playlist ID")
     lyrics: Optional[str] = Field(None, description="Lyrics browse ID")
+    stream_urls_prefetched: Optional[int] = Field(None, description="Number of tracks with prefetched stream URLs")
+    stream_urls_total: Optional[int] = Field(None, description="Total number of tracks")
     
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")

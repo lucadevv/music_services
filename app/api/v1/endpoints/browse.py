@@ -12,6 +12,8 @@ from app.schemas.browse import (
     HomeResponse,
     LyricsResponse,
     SongResponse,
+    AlbumBrowseIdResponse,
+    RelatedSongsResponse,
 )
 from app.schemas.errors import COMMON_ERROR_RESPONSES
 from app.services.browse_service import BrowseService
@@ -144,7 +146,7 @@ async def get_album(
 
 @router.get(
     "/album/{album_id}/browse-id",
-    response_model=Dict[str, Any],
+    response_model=AlbumBrowseIdResponse,
     summary="Get album browse ID",
     description="Obtiene el browse ID de un álbum a partir de su ID.",
     response_description="Browse ID del álbum",
@@ -153,11 +155,11 @@ async def get_album(
 async def get_album_browse_id(
     album_id: str = Path(..., description="ID del álbum", examples={"example1": {"value": "MPREb..."}}),
     service: BrowseService = Depends(get_browse_service)
-) -> Dict[str, str]:
+) -> AlbumBrowseIdResponse:
     """Obtiene el browse ID de un álbum."""
     try:
         browse_id = await service.get_album_browse_id(album_id)
-        return {"browse_id": browse_id}
+        return AlbumBrowseIdResponse(browse_id=browse_id)
     except YTMusicServiceException:
         raise
     except Exception as e:
@@ -189,6 +191,7 @@ async def get_song(
 
 @router.get(
     "/song/{video_id}/related",
+    response_model=RelatedSongsResponse,
     summary="Get related songs",
     description="Obtiene canciones relacionadas a una canción específica.",
     response_description="Lista de canciones relacionadas",
@@ -197,20 +200,24 @@ async def get_song(
             "description": "Canciones relacionadas obtenidas exitosamente",
             "content": {
                 "application/json": {
-                    "example": [
-                        {
-                            "videoId": "abc123",
-                            "title": "Related Song",
-                            "stream_url": "https://...",
-                            "thumbnail": "https://..."
-                        }
-                    ]
+                    "example": {
+                        "songs": [
+                            {
+                                "videoId": "abc123",
+                                "title": "Related Song",
+                                "stream_url": "https://...",
+                                "thumbnail": "https://..."
+                            }
+                        ],
+                        "count": 10
+                    }
                 }
             }
         },
         500: {"description": "Error interno"},
         502: {"description": "Bad Gateway"},
-        404: {"description": "No encontrado"}
+        404: {"description": "No encontrado"},
+        **COMMON_ERROR_RESPONSES
     }
 )
 async def get_song_related(
@@ -221,7 +228,7 @@ async def get_song_related(
     ),
     service: BrowseService = Depends(get_browse_service),
     stream_service: StreamService = Depends(get_stream_service)
-) -> List[Dict[str, Any]]:
+) -> RelatedSongsResponse:
     """
     Obtiene canciones relacionadas a una canción.
     
@@ -243,7 +250,7 @@ async def get_song_related(
                 include_stream_urls=True
             )
         
-        return related_songs
+        return RelatedSongsResponse(songs=related_songs, count=len(related_songs))
     except YTMusicServiceException:
         raise
     except Exception as e:
@@ -264,6 +271,7 @@ async def get_song_related(
 
 @router.get(
     "/lyrics/{browse_id}",
+    response_model=LyricsResponse,
     summary="Get song lyrics",
     description="Obtiene las letras de una canción usando su browse ID.",
     response_description="Letras de la canción",
@@ -272,11 +280,11 @@ async def get_song_related(
 async def get_lyrics(
     browse_id: str = Path(..., description="Browse ID de la canción", examples={"example1": {"value": "MPAD..."}}),
     service: BrowseService = Depends(get_browse_service)
-) -> Dict[str, Any]:
+) -> LyricsResponse:
     """Obtiene las letras de una canción."""
     try:
         result = await service.get_lyrics(browse_id)
-        return result
+        return LyricsResponse(**result) if isinstance(result, dict) else result
     except YTMusicServiceException:
         raise
     except Exception as e:
@@ -285,6 +293,7 @@ async def get_lyrics(
 
 @router.get(
     "/lyrics-by-video/{video_id}",
+    response_model=LyricsResponse,
     summary="Get song lyrics by video ID",
     description="Obtiene las letras de una canción usando su video ID.",
     response_description="Letras de la canción",
@@ -293,11 +302,11 @@ async def get_lyrics(
 async def get_lyrics_by_video(
     video_id: str = Path(..., description="Video ID de YouTube", examples={"example1": {"value": "dQw4w9WgXcQ"}}),
     service: BrowseService = Depends(get_browse_service)
-) -> Dict[str, Any]:
+) -> LyricsResponse:
     """Obtiene las letras de una canción por su video ID."""
     try:
         result = await service.get_lyrics_by_video_id(video_id)
-        return result
+        return LyricsResponse(**result) if isinstance(result, dict) else result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
