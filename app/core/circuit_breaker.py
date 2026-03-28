@@ -80,8 +80,8 @@ class CircuitBreaker:
             'resource_exhausted'
         ])
         
-        if is_rate_limit or self.failure_count >= self.failure_threshold:
-            # Open the circuit
+        # Only open circuit on actual rate limiting, not on auth errors (400)
+        if is_rate_limit:
             self.state = CircuitState.OPEN
             self.opened_at = time.time()
             self.failure_count = 0  # Reset for next cycle

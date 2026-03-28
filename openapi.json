@@ -3878,42 +3878,6 @@
         }
       }
     },
-    "/api/v1/uploads/": {
-      "get": {
-        "tags": [
-          "uploads",
-          "uploads"
-        ],
-        "summary": "Uploads information",
-        "description": "Información sobre endpoints de uploads. Los endpoints de uploads requieren autenticación de usuario.",
-        "operationId": "uploads_info_api_v1_uploads__get",
-        "responses": {
-          "200": {
-            "description": "Información y endpoints públicos alternativos",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Uploads Info Api V1 Uploads  Get"
-                }
-              }
-            }
-          },
-          "501": {
-            "description": "Endpoint no implementado",
-            "content": {
-              "application/json": {
-                "example": {
-                  "error": "NOT_IMPLEMENTED",
-                  "message": "Upload endpoints are not implemented in this version. Use /api/v1/explore for public content."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/stream/proxy/{video_id}": {
       "get": {
         "tags": [

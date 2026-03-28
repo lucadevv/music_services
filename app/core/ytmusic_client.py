@@ -46,11 +46,21 @@ def get_ytmusic_client() -> YTMusic:
     settings = get_settings()
     oauth_path = Path(settings.OAUTH_JSON_PATH)
 
-    if not oauth_path.exists():
-        raise FileNotFoundError(
-            f"No se encontró archivo de autenticación: {oauth_path}\n"
-            f"Configura OAuth desde el panel admin o genera oauth.json."
-        )
+    # Check if oauth file exists and is valid BEFORE raising error
+    oauth_valid = False
+    if oauth_path.exists() and oauth_path.stat().st_size > 0:
+        try:
+            import json
+            with open(oauth_path) as f:
+                token_data = json.load(f)
+            if token_data.get("access_token") and token_data.get("access_token") not in ("", "dummy", None):
+                oauth_valid = True
+        except Exception:
+            pass
+    
+    if not oauth_valid:
+        logger.warning("oauth.json no existe, está vacío o tiene token inválido. API funcionará sin OAuth.")
+        return None
 
     client_id = settings.YTMUSIC_CLIENT_ID
     client_secret = settings.YTMUSIC_CLIENT_SECRET
@@ -78,6 +88,23 @@ def get_ytmusic_client() -> YTMusic:
             "Configura client_id y client_secret desde el panel admin o en .env."
         )
 
+    # Check if oauth file is empty or dummy
+    oauth_path_obj = Path(oauth_path)
+    if not oauth_path_obj.exists() or oauth_path_obj.stat().st_size == 0:
+        logger.warning("oauth.json no existe o está vacío. API funcionará sin OAuth.")
+        return None
+    
+    # Check if token is dummy/placeholder
+    try:
+        import json
+        with open(oauth_path) as f:
+            token_data = json.load(f)
+        if token_data.get("access_token") in ("", "dummy", None):
+            logger.warning("oauth.json tiene token inválido. API funcionará sin OAuth.")
+            return None
+    except Exception:
+        pass
+    
     try:
         credentials = OAuthCredentials(
             client_id=client_id,
@@ -87,10 +114,8 @@ def get_ytmusic_client() -> YTMusic:
         print("✅ YTMusic inicializado con OAuth")
         return client
     except Exception as e:
-        raise RuntimeError(
-            f"Error inicializando YTMusic con OAuth: {e}\n"
-            f"Verifica que oauth.json y las credenciales sean correctas."
-        ) from e
+        logger.warning(f"Error inicializando YTMusic con OAuth: {e}. API funcionará sin OAuth.")
+        return None
 
 
 def get_ytmusic() -> YTMusic:

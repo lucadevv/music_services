@@ -338,19 +338,23 @@ async def get_mood_categories(
 )
 async def get_mood_playlists(
     params: str = Path(..., description="Parámetros codificados de la categoría", examples={"example1": {"value": "ggMPOg1uX3hRRFdlaEhHU09k"}}),
+    page: int = Query(1, ge=1, le=100, description="Número de página"),
+    page_size: int = Query(10, ge=1, le=50, description="Playlists por página"),
     service: ExploreService = Depends(get_explore_service)
-) -> MoodPlaylistsResponse:
+) -> Dict[str, Any]:
     """
-    Obtiene playlists de una categoría de mood o género.
+    Obtiene playlists de una categoría con paginación.
     
     Usa los `params` de una categoría obtenida en `/explore/moods` o `/explore`.
     Los params son valores codificados como `ggMPOg1uX1JOQWZFeDByc2Jm`.
     """
     try:
-        result = await service.get_mood_playlists(params)
-        return {
-            "playlists": result
-        }
+        result = await service.get_mood_playlists(
+            params=params,
+            page=page,
+            page_size=page_size
+        )
+        return result
     except YTMusicServiceException:
         raise
     except Exception as e:
@@ -392,14 +396,16 @@ async def get_charts(
         None, 
         description="Código de país ISO 3166-1 Alpha-2 (ej: 'US', 'PE'). Default: global"
     ),
+    page: int = Query(1, ge=1, le=100, description="Número de página"),
+    page_size: int = Query(10, ge=1, le=50, description="Canciones por página"),
     include_stream_urls: bool = Query(
         False, 
         description="Incluir stream URLs y mejores thumbnails"
     ),
     service: ExploreService = Depends(get_explore_service)
-) -> ChartsResponse:
+) -> Dict[str, Any]:
     """
-    Obtiene charts de YouTube Music.
+    Obtiene charts de YouTube Music con paginación.
     
     - **top_songs**: Canciones más populares
     - **trending**: Canciones en tendencia
@@ -410,41 +416,46 @@ async def get_charts(
     - `thumbnail`: URL de thumbnail en mejor calidad
     """
     try:
-        charts = await service.get_charts(country)
-        
-        top_songs_data = charts.get('top_songs', [])
+        charts = await service.get_charts(
+            country=country,
+            page=page,
+            page_size=page_size
+        )
+
+        top_songs_data = charts.get('charts', {}).get('items', [])
         if not top_songs_data:
-            top_songs_data = charts.get('videos', [])
-        
+            top_songs_data = charts.get('top_songs', [])
+
         trending_data = charts.get('trending', [])
         if not trending_data:
             trending_data = top_songs_data
-        
+
         # Enrich with stream URLs and thumbnails
         if include_stream_urls:
             from app.services.stream_service import StreamService
             stream_service = StreamService()
-            
+
             # Enrich top_songs
             if top_songs_data:
                 top_songs_data = await stream_service.enrich_items_with_streams(
-                    top_songs_data, 
+                    top_songs_data,
                     include_stream_urls=True
                 )
-            
+
             # Enrich trending
             if trending_data:
                 trending_data = await stream_service.enrich_items_with_streams(
-                    trending_data, 
+                    trending_data,
                     include_stream_urls=True
                 )
-        
+
         response = {
-            "top_songs": top_songs_data,
+            "charts": top_songs_data,
             "trending": trending_data,
-            "country": country or "global"
+            "country": country or "global",
+            "pagination": charts.get('charts', {}).get('pagination', {})
         }
-        
+
         return response
     except YTMusicServiceException:
         raise

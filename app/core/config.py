@@ -1,4 +1,5 @@
 """Application configuration."""
+import os
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import Optional
@@ -12,7 +13,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "YouTube Music Service"
     VERSION: str = "1.0.0"
     
-    OAUTH_JSON_PATH: str = "oauth.json"
+    OAUTH_JSON_PATH: str = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "oauth.json")
     YTMUSIC_CLIENT_ID: Optional[str] = None
     YTMUSIC_CLIENT_SECRET: Optional[str] = None
     ADMIN_SECRET_KEY: Optional[str] = None

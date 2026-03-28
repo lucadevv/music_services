@@ -7,6 +7,11 @@
       "oauth": {
         "clientId": "JtbQGX-2B6GKMvIl"
       }
+    },
+    "notion": {
+      "type": "remote",
+      "url": "https://mcp.notion.com/mcp",
+      "oauth": {}
     }
   }
 }

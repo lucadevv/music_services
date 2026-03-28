@@ -4,6 +4,8 @@ from ytmusicapi import YTMusic
 import asyncio
 
 from app.services.base_service import BaseService
+from app.services.pagination_service import PaginationService
+from app.services.response_service import ResponseService
 from app.core.cache import cache_result
 from app.core.exceptions import ResourceNotFoundError, ExternalServiceError
 
@@ -43,22 +45,48 @@ class ExploreService(BaseService):
             raise self._handle_ytmusic_error(e, "obtener categorías de moods")
     
     @cache_result(ttl=3600)
-    async def get_mood_playlists(self, params: str) -> List[Dict[str, Any]]:
+    async def get_mood_playlists(
+        self,
+        params: str,
+        page: int = 1,
+        page_size: int = 10,
+        max_page_size: int = 50
+    ) -> Dict[str, Any]:
         """
-        Get mood playlists for a given category.
-        
+        Get mood playlists for a given category with pagination.
+
         Args:
-            params: Category parameters.
-        
+            params: Category parameters
+            page: Current page number (default: 1)
+            page_size: Number of playlists per page (default: 10, max: 50)
+            max_page_size: Maximum allowed page size
+
         Returns:
-            List of playlists.
+            Playlists with pagination metadata
         """
-        self._log_operation("get_mood_playlists", params=params)
-        
+        self._log_operation("get_mood_playlists", params=params, page=page, page_size=page_size)
+
         try:
             result = await asyncio.to_thread(self.ytmusic.get_mood_playlists, params)
+            playlists = result if result is not None else []
+
+            # Standardize playlists
+            standardized_playlists = [
+                ResponseService.standardize_song_object(playlist, include_stream_url=False)
+                for playlist in playlists
+            ]
+
+            # Paginate
+            paginated = PaginationService.paginate(
+                standardized_playlists,
+                page=page,
+                page_size=page_size,
+                max_page_size=max_page_size
+            )
+
             self.logger.info(f"Retrieved mood playlists for params: {params}")
-            return result
+            return paginated
+
         except KeyError as e:
             error_msg = str(e)
             if 'musicTwoRowItemRenderer' in error_msg or 'renderer' in error_msg.lower():
@@ -196,23 +224,53 @@ class ExploreService(BaseService):
         return unique_results[:limit]
     
     @cache_result(ttl=1800)
-    async def get_charts(self, country: Optional[str] = None) -> Dict[str, Any]:
+    async def get_charts(
+        self,
+        country: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 10,
+        max_page_size: int = 50
+    ) -> Dict[str, Any]:
         """
-        Get charts.
-        
+        Get charts with pagination.
+
         Args:
-            country: Country code (optional).
-        
+            country: Country code (optional)
+            page: Current page number (default: 1)
+            page_size: Number of songs per page (default: 10, max: 50)
+            max_page_size: Maximum allowed page size
+
         Returns:
-            Charts dictionary.
+            Charts with paginated songs
         """
-        self._log_operation("get_charts", country=country)
-        
+        self._log_operation("get_charts", country=country, page=page, page_size=page_size)
+
         try:
             result = await asyncio.to_thread(self.ytmusic.get_charts, country)
             charts = result if result is not None else {}
-            self.logger.info(f"Retrieved charts for country: {country or 'global'}")
-            return charts
+
+            # Extract songs from different possible locations
+            songs = charts.get('top_songs', []) or charts.get('videos', [])
+
+            # Standardize songs
+            standardized_songs = [
+                ResponseService.standardize_song_object(song, include_stream_url=False)
+                for song in songs
+            ]
+
+            # Paginate
+            paginated = PaginationService.paginate(
+                standardized_songs,
+                page=page,
+                page_size=page_size,
+                max_page_size=max_page_size
+            )
+
+            return {
+                "charts": paginated,
+                "country": country or "global"
+            }
+
         except Exception as e:
             raise self._handle_ytmusic_error(e, f"obtener charts (país: {country or 'global'})")
     

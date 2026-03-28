@@ -44,7 +44,7 @@ services:
       - HTTP_TIMEOUT=${HTTP_TIMEOUT:-30}
       - MAX_WORKERS=${MAX_WORKERS:-4}
     volumes:
-      - ./oauth.json:/app/oauth.json
+      - oauth_data:/app
     depends_on:
       ytmusic_redis:
         condition: service_healthy
@@ -145,5 +145,7 @@ networks:
     name: music_app_network
 
 volumes:
+  oauth_data:
+    driver: local
   ytmusic_redis_data:
     driver: local

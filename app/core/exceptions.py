@@ -131,6 +131,10 @@ class CircuitBreakerError(YTMusicServiceException):
     """
     status_code = 503
     error_code = "SERVICE_UNAVAILABLE"
+    
+    def __init__(self, message: str = "Service temporarily unavailable", retry_after: int = 60, **kwargs):
+        super().__init__(message, **kwargs)
+        self.retry_after = retry_after
 
 
 # Convenience functions for creating common exceptions

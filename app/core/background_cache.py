@@ -104,6 +104,10 @@ class CacheManager:
         logger.info("Warming endpoint cache...")
         
         ytmusic = get_ytmusic()
+        if ytmusic is None:
+            logger.warning("YTMusic not available. Skipping cache warming.")
+            return
+        
         explore_svc = ExploreService(ytmusic)
         browse_svc = BrowseService(ytmusic)
         search_svc = SearchService(ytmusic)

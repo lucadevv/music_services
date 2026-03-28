@@ -36,16 +36,23 @@ def get_stream_service() -> StreamService:
     "/home",
     response_model=HomeResponse,
     summary="Get home page",
-    description="Obtiene el contenido de la página principal de YouTube Music.",
-    response_description="Contenido de la página principal",
+    description="Obtiene el contenido de la página principal de YouTube Music con paginación.",
+    response_description="Contenido paginado de la página principal",
     responses={200: {"description": "Contenido obtenido exitosamente"}, **COMMON_ERROR_RESPONSES}
 )
 async def get_home(
+    limit: int = Query(20, ge=1, le=50, description="Número de secciones a obtener"),
+    page: int = Query(1, ge=1, le=100, description="Número de página (1-indexed)"),
+    page_size: int = Query(10, ge=1, le=50, description="Items por página (máximo 50)"),
     service: BrowseService = Depends(get_browse_service)
-) -> List[Dict[str, Any]]:
-    """Obtiene el contenido de la página principal de YouTube Music."""
+) -> Dict[str, Any]:
+    """Obtiene el contenido de la página principal con paginación."""
     try:
-        result = await service.get_home()
+        result = await service.get_home(
+            limit=limit,
+            page=page,
+            page_size=page_size
+        )
         return result
     except YTMusicServiceException:
         raise
@@ -81,8 +88,8 @@ async def get_artist_albums(
     "/album/{album_id}",
     response_model=AlbumResponse,
     summary="Get album information",
-    description="Obtiene información completa de un álbum incluyendo todas sus canciones.",
-    response_description="Información del álbum con tracks",
+    description="Obtiene información completa de un álbum con paginación para tracks.",
+    response_description="Información del álbum con tracks paginados",
     responses={
         200: {
             "description": "Álbum obtenido exitosamente",
@@ -98,7 +105,15 @@ async def get_artist_albums(
                                 "stream_url": "https://...",
                                 "thumbnail": "https://..."
                             }
-                        ]
+                        ],
+                        "pagination": {
+                            "total_results": 45,
+                            "total_pages": 5,
+                            "page": 1,
+                            "page_size": 10,
+                            "has_next": True,
+                            "has_prev": False
+                        }
                     }
                 }
             }
@@ -108,6 +123,8 @@ async def get_artist_albums(
 )
 async def get_album(
     album_id: str = Path(..., description="ID del álbum", examples={"example1": {"value": "MPREb..."}}),
+    page: int = Query(1, ge=1, le=100, description="Número de página (1-indexed)"),
+    page_size: int = Query(10, ge=1, le=50, description="Tracks por página (máximo 50)"),
     include_stream_urls: bool = Query(
         True, 
         description="Incluir stream URLs y mejores thumbnails para tracks"
@@ -116,27 +133,28 @@ async def get_album(
     stream_service: StreamService = Depends(get_stream_service)
 ) -> Dict[str, Any]:
     """
-    Obtiene información completa de un álbum.
+    Obtiene información completa de un álbum con tracks paginados.
     
     Si `include_stream_urls=true`, cada track incluye:
     - `stream_url`: URL directa de audio (mejor calidad)
     - `thumbnail`: URL de thumbnail en mejor calidad
     """
     try:
-        album_data = await service.get_album(album_id)
-        
+        album_data = await service.get_album(
+            album_id=album_id,
+            page=page,
+            page_size=page_size
+        )
+
         if include_stream_urls:
-            tracks = album_data.get('tracks') or album_data.get('songs') or []
+            tracks = album_data.get('items') or album_data.get('tracks') or album_data.get('songs') or []
             if tracks:
                 enriched_tracks = await stream_service.enrich_items_with_streams(
-                    tracks, 
+                    tracks,
                     include_stream_urls=True
                 )
-                if 'tracks' in album_data:
-                    album_data['tracks'] = enriched_tracks
-                elif 'songs' in album_data:
-                    album_data['songs'] = enriched_tracks
-        
+                album_data['items'] = enriched_tracks
+
         return album_data
     except YTMusicServiceException:
         raise
@@ -222,15 +240,17 @@ async def get_song(
 )
 async def get_song_related(
     video_id: str = Path(..., description="ID del video/canción", examples={"example1": {"value": "rMbATaj7Il8"}}),
+    page: int = Query(1, ge=1, le=100, description="Número de página (1-indexed)"),
+    page_size: int = Query(10, ge=1, le=50, description="Canciones por página (máximo 50)"),
     include_stream_urls: bool = Query(
         False, 
         description="Incluir stream URLs y mejores thumbnails"
     ),
     service: BrowseService = Depends(get_browse_service),
     stream_service: StreamService = Depends(get_stream_service)
-) -> RelatedSongsResponse:
+) -> Dict[str, Any]:
     """
-    Obtiene canciones relacionadas a una canción.
+    Obtiene canciones relacionadas con paginación.
     
     Si `include_stream_urls=true`, cada canción incluye:
     - `stream_url`: URL directa de audio (mejor calidad)
@@ -239,18 +259,19 @@ async def get_song_related(
     from app.core.exceptions import ExternalServiceError, ResourceNotFoundError
     
     try:
-        related_songs = await service.get_song_related(video_id)
-        # Ensure we always return a list, even if service returns None
-        if related_songs is None:
-            related_songs = []
-        
-        if include_stream_urls and related_songs:
-            related_songs = await stream_service.enrich_items_with_streams(
-                related_songs, 
+        result = await service.get_song_related(
+            video_id=video_id,
+            page=page,
+            page_size=page_size
+        )
+
+        if include_stream_urls and result.get('items'):
+            result['items'] = await stream_service.enrich_items_with_streams(
+                result['items'],
                 include_stream_urls=True
             )
-        
-        return RelatedSongsResponse(songs=related_songs, count=len(related_songs))
+
+        return result
     except YTMusicServiceException:
         raise
     except Exception as e:

@@ -57,6 +57,8 @@ async def get_playlist(
     playlist_id: str = Path(..., description="ID de la playlist (acepta browseId con prefijo VL)", examples={"example1": {"value": "PL..."}}),
     limit: int = Query(100, ge=1, le=5000, description="Número máximo de canciones"),
     start_index: int = Query(0, ge=0, description="Índice inicial para paginación"),
+    page: int = Query(1, ge=1, le=100, description="Número de página (1-indexed)"),
+    page_size: int = Query(10, ge=1, le=50, description="Items por página"),
     related: bool = Query(False, description="Incluir canciones relacionadas"),
     suggestions_limit: int = Query(0, ge=0, le=50, description="Límite de sugerencias"),
     include_stream_urls: bool = Query(
@@ -71,13 +73,13 @@ async def get_playlist(
     ),
     service: PlaylistService = Depends(get_playlist_service),
     stream_service: StreamService = Depends(get_stream_service)
-) -> PlaylistResponse:
+) -> Dict[str, Any]:
     """
-    Obtiene información completa de una playlist pública con paginación.
+    Obtiene información completa de una playlist pública con paginación estandarizada.
     
     - Acepta `playlistId` o `browseId` (con prefijo VL, se normaliza automáticamente)
-    - `start_index`: Índice inicial para paginación (0 = desde el inicio)
-    - `limit`: Número máximo de canciones a retornar
+    - `page`: Número de página (1 = primera página)
+    - `page_size`: Items por página (default 10, máximo 50)
     - `prefetch_count`: Cuántos tracks enriquecer con stream URLs (default: 10, -1 = todos)
     
     Si `include_stream_urls=true` y `prefetch_count > 0`, los primeros N tracks incluyen:
@@ -85,42 +87,35 @@ async def get_playlist(
     """
     try:
         playlist_data = await service.get_playlist(
-            playlist_id, 
-            limit, 
-            related, 
-            suggestions_limit,
-            start_index
+            playlist_id=playlist_id,
+            limit=limit,
+            related=related,
+            suggestions_limit=suggestions_limit,
+            start_index=start_index,
+            page=page,
+            page_size=page_size
         )
-        
-        # Apply limit/offset AFTER service returns
-        if playlist_data.get('tracks'):
-            tracks = playlist_data['tracks']
-            if start_index > 0 and start_index < len(tracks):
-                tracks = tracks[start_index:]
-            if limit > 0 and limit < len(tracks):
-                tracks = tracks[:limit]
-            playlist_data['tracks'] = tracks
-        
+
         # Enrich tracks with stream URLs
-        if include_stream_urls and prefetch_count != 0 and playlist_data.get('tracks'):
-            tracks = playlist_data['tracks']
+        if include_stream_urls and prefetch_count != 0 and playlist_data.get('items'):
+            tracks = playlist_data['items']
             tracks_to_enrich = tracks if prefetch_count == -1 else tracks[:prefetch_count]
             tracks_remaining = [] if prefetch_count == -1 else tracks[prefetch_count:]
-            
+
             if tracks_to_enrich:
                 enriched_tracks = await stream_service.enrich_items_with_streams(
-                    tracks_to_enrich, 
+                    tracks_to_enrich,
                     include_stream_urls=True
                 )
-                
+
                 if tracks_remaining:
                     enriched_tracks.extend(tracks_remaining)
-                
-                playlist_data['tracks'] = enriched_tracks
+
+                playlist_data['items'] = enriched_tracks
                 tracks_with_url = sum(1 for t in enriched_tracks if t.get('stream_url'))
                 playlist_data['stream_urls_prefetched'] = tracks_with_url
                 playlist_data['stream_urls_total'] = len(enriched_tracks)
-        
+
         return playlist_data
     except YTMusicServiceException:
         raise

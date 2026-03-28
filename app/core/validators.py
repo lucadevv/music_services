@@ -307,7 +307,7 @@ def validate_search_filter(filter_value: Optional[str]) -> Optional[str]:
     
     valid_filters = {
         "songs", "videos", "albums", "artists", "playlists", 
-        "community_playlists", "featured_playlists", "uploads"
+        "community_playlists", "featured_playlists"
     }
     
     if filter_value not in valid_filters:

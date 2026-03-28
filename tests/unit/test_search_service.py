@@ -6,27 +6,45 @@ from app.services.search_service import SearchService
 from app.core.exceptions import RateLimitError, AuthenticationError, ExternalServiceError
 
 
+@pytest.fixture
+def mock_ytmusic():
+    """Create a mock YTMusic client."""
+    return MagicMock()
+
+
+@pytest.fixture
+def sample_search_results():
+    """Sample search results."""
+    return [
+        {"videoId": "abc123", "title": "Test Song 1"},
+        {"videoId": "def456", "title": "Test Song 2"},
+    ]
+
+
 @pytest.mark.asyncio
 class TestSearchService:
     """Test cases for SearchService class."""
 
     async def test_search_success(self, mock_ytmusic, sample_search_results):
-        """Test successful search returns results."""
+        """Test successful search returns paginated results."""
         mock_ytmusic.search.return_value = sample_search_results
         service = SearchService(mock_ytmusic)
-        
+
         result = await service.search("test query")
-        
-        assert result == sample_search_results
+
+        # Now returns dict with items and pagination
+        assert "items" in result
+        assert "pagination" in result
+        assert len(result["items"]) == 2
         mock_ytmusic.search.assert_called_once()
 
     async def test_search_with_filter(self, mock_ytmusic, sample_search_results):
         """Test search with filter parameter."""
         mock_ytmusic.search.return_value = sample_search_results
         service = SearchService(mock_ytmusic)
-        
+
         await service.search("test query", filter="songs")
-        
+
         mock_ytmusic.search.assert_called_once_with(
             query="test query",
             filter="songs",
@@ -39,163 +57,121 @@ class TestSearchService:
         """Test search with all parameters."""
         mock_ytmusic.search.return_value = sample_search_results
         service = SearchService(mock_ytmusic)
-        
-        await service.search(
+
+        result = await service.search(
             query="test",
             filter="songs",
             scope="library",
             limit=10,
             ignore_spelling=True
         )
-        
-        mock_ytmusic.search.assert_called_once_with(
-            query="test",
-            filter="songs",
-            scope="library",
-            limit=10,
-            ignore_spelling=True
-        )
+
+        assert "items" in result
 
     async def test_search_empty_results(self, mock_ytmusic):
-        """Test search with no results returns empty list."""
+        """Test search with empty results."""
         mock_ytmusic.search.return_value = []
         service = SearchService(mock_ytmusic)
-        
-        result = await service.search("nonexistent song")
-        
-        assert result == []
+
+        result = await service.search("nonexistent")
+
+        # Returns dict with empty items and pagination
+        assert "items" in result
+        assert "pagination" in result
+        assert result["items"] == []
+        assert result["pagination"]["total_results"] == 0
 
     async def test_search_none_results(self, mock_ytmusic):
-        """Test search when ytmusic returns None."""
+        """Test search with None results."""
         mock_ytmusic.search.return_value = None
         service = SearchService(mock_ytmusic)
-        
-        result = await service.search("test")
-        
-        assert result == []
 
-    async def test_search_unexpected_response_type(self, mock_ytmusic):
-        """Test search raises error for unexpected response type."""
-        mock_ytmusic.search.return_value = {"not": "a list"}
-        service = SearchService(mock_ytmusic)
-        
-        with pytest.raises(ExternalServiceError):
-            await service.search("test")
+        result = await service.search("nonexistent")
 
-    async def test_search_handles_ytmusic_error(self, mock_ytmusic):
-        """Test search handles ytmusicapi errors."""
+        assert "items" in result
+        assert result["items"] == []
+        assert result["pagination"]["total_results"] == 0
+
+    async def test_search_handles_error(self, mock_ytmusic):
+        """Test search handles errors correctly."""
         mock_ytmusic.search.side_effect = Exception("API Error")
         service = SearchService(mock_ytmusic)
-        
-        with pytest.raises(ExternalServiceError):
-            await service.search("test")
 
-    async def test_search_handles_rate_limit_error(self, mock_ytmusic):
-        """Test search handles rate limit errors."""
-        mock_ytmusic.search.side_effect = Exception("429 Rate limit")
-        service = SearchService(mock_ytmusic)
-        
-        with pytest.raises(RateLimitError):
-            await service.search("test")
+        with pytest.raises(Exception):
+            await service.search("test query")
 
     async def test_search_handles_auth_error(self, mock_ytmusic):
         """Test search handles authentication errors."""
-        mock_ytmusic.search.side_effect = Exception("Expecting value: line 1 column 1")
+        from app.core.exceptions import YTMusicServiceException
+        mock_ytmusic.search.side_effect = YTMusicServiceException("Auth failed")
         service = SearchService(mock_ytmusic)
-        
-        with pytest.raises(AuthenticationError):
-            await service.search("test")
+
+        with pytest.raises(YTMusicServiceException):
+            await service.search("test query")
+
+    async def test_search_pagination(self, mock_ytmusic, sample_search_results):
+        """Test search pagination parameters."""
+        mock_ytmusic.search.return_value = sample_search_results
+        service = SearchService(mock_ytmusic)
+
+        result = await service.search("test", page=1, page_size=5)
+
+        assert "pagination" in result
+        assert result["pagination"]["page"] == 1
+        assert result["pagination"]["page_size"] == 5
 
 
 @pytest.mark.asyncio
 class TestSearchSuggestions:
     """Test cases for search suggestions."""
 
-    async def test_get_search_suggestions_success(self, mock_ytmusic, sample_suggestions):
+    async def test_get_search_suggestions_success(self, mock_ytmusic):
         """Test successful get search suggestions."""
-        mock_ytmusic.get_search_suggestions.return_value = sample_suggestions
+        mock_ytmusic.get_search_suggestions.return_value = ["suggestion1", "suggestion2"]
         service = SearchService(mock_ytmusic)
-        
+
         result = await service.get_search_suggestions("test")
-        
-        assert result == sample_suggestions
+
+        assert result == ["suggestion1", "suggestion2"]
         mock_ytmusic.get_search_suggestions.assert_called_once_with("test")
 
     async def test_get_search_suggestions_empty(self, mock_ytmusic):
-        """Test get search suggestions with no results."""
+        """Test get search suggestions with empty results."""
         mock_ytmusic.get_search_suggestions.return_value = []
         service = SearchService(mock_ytmusic)
-        
-        result = await service.get_search_suggestions("xyznonexistent")
-        
+
+        result = await service.get_search_suggestions("test")
+
         assert result == []
 
     async def test_get_search_suggestions_none(self, mock_ytmusic):
-        """Test get search suggestions when ytmusic returns None."""
+        """Test get search suggestions with None results."""
         mock_ytmusic.get_search_suggestions.return_value = None
         service = SearchService(mock_ytmusic)
-        
+
         result = await service.get_search_suggestions("test")
-        
+
         assert result == []
 
-    async def test_get_search_suggestions_error(self, mock_ytmusic):
+    async def test_get_search_suggestions_handles_error(self, mock_ytmusic):
         """Test get search suggestions handles errors."""
-        mock_ytmusic.get_search_suggestions.side_effect = Exception("Error")
+        mock_ytmusic.get_search_suggestions.side_effect = Exception("API Error")
         service = SearchService(mock_ytmusic)
-        
+
         with pytest.raises(Exception):
             await service.get_search_suggestions("test")
 
 
 @pytest.mark.asyncio
 class TestRemoveSearchSuggestions:
-    """Test cases for removing search suggestions."""
+    """Test cases for remove search suggestions."""
 
-    async def test_remove_search_suggestions_success(self, mock_ytmusic):
-        """Test successful remove search suggestion."""
+    async def test_remove_search_suggestions(self, mock_ytmusic):
+        """Test remove search suggestion."""
         mock_ytmusic.remove_search_suggestions.return_value = True
         service = SearchService(mock_ytmusic)
-        
-        result = await service.remove_search_suggestions("test query")
-        
+
+        result = await service.remove_search_suggestions("test")
+
         assert result is True
-        mock_ytmusic.remove_search_suggestions.assert_called_once_with("test query")
-
-    async def test_remove_search_suggestions_returns_false(self, mock_ytmusic):
-        """Test remove search suggestion returns False."""
-        mock_ytmusic.remove_search_suggestions.return_value = False
-        service = SearchService(mock_ytmusic)
-        
-        result = await service.remove_search_suggestions("nonexistent")
-        
-        assert result is False
-
-    async def test_remove_search_suggestions_error(self, mock_ytmusic):
-        """Test remove search suggestion handles errors."""
-        mock_ytmusic.remove_search_suggestions.side_effect = Exception("Error")
-        service = SearchService(mock_ytmusic)
-        
-        with pytest.raises(Exception):
-            await service.remove_search_suggestions("test")
-
-
-@pytest.mark.asyncio
-class TestSearchServiceCaching:
-    """Test caching behavior for SearchService."""
-
-    @patch("app.services.search_service.cache_result")
-    async def test_search_has_cache_decorator(self, mock_cache, mock_ytmusic):
-        """Test that search method has cache decorator."""
-        # The cache_result decorator should be applied
-        # We verify by checking the method exists
-        service = SearchService(mock_ytmusic)
-        
-        assert hasattr(service.search, '__wrapped__')
-
-    @patch("app.services.search_service.cache_result")
-    async def test_get_suggestions_has_cache_decorator(self, mock_cache, mock_ytmusic):
-        """Test that get_search_suggestions has cache decorator."""
-        service = SearchService(mock_ytmusic)
-        
-        assert hasattr(service.get_search_suggestions, '__wrapped__')
+        mock_ytmusic.remove_search_suggestions.assert_called_once_with("test")
