@@ -83,13 +83,6 @@ async def get_playlist(
     Si `include_stream_urls=true` y `prefetch_count > 0`, los primeros N tracks incluyen:
     - `stream_url`: URL directa de audio (mejor calidad)
     """
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:playlist:{playlist_id}:{limit}:{start_index}:{include_stream_urls}:{prefetch_count}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         playlist_data = await service.get_playlist(
             playlist_id, 
@@ -127,14 +120,6 @@ async def get_playlist(
                 tracks_with_url = sum(1 for t in enriched_tracks if t.get('stream_url'))
                 playlist_data['stream_urls_prefetched'] = tracks_with_url
                 playlist_data['stream_urls_total'] = len(enriched_tracks)
-        
-        # Cache por 10 min
-        try:
-            await set_cached_value(cache_key, playlist_data, ttl=600)
-        except YTMusicServiceException:
-            raise
-        except Exception:
-            pass
         
         return playlist_data
     except YTMusicServiceException:

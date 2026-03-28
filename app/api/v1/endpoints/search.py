@@ -93,14 +93,6 @@ async def search_music(
     q = validate_search_query(q)
     filter = validate_search_filter(filter)
     
-    # Cache key based on all params
-    cache_key = f"music:endpoint:search:{q}:{filter}:{scope}:{limit}:{start_index}:{include_stream_urls}"
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     # Search - exceptions handled by global handlers
     results = await service.search(q, filter, scope, limit, ignore_spelling, start_index)
     
@@ -131,12 +123,6 @@ async def search_music(
                     results[i] = enriched_map[video_id]
     
     response = {"results": results, "query": q}
-    
-    # Cache by 5 min
-    try:
-        await set_cached_value(cache_key, response, ttl=300)
-    except Exception:
-        pass
     
     return response
 
@@ -172,19 +158,9 @@ async def get_search_suggestions(
     - `VALIDATION_ERROR` (400): Query vacío
     - `EXTERNAL_SERVICE_ERROR` (502): Error de YouTube Music
     """
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:search:suggestions:{q.lower()}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     q = validate_search_query(q)
     suggestions = await service.get_search_suggestions(q)
-    response = {"suggestions": suggestions}
-    
-    await set_cached_value(cache_key, response, ttl=600)
-    return response
+    return {"suggestions": suggestions}
 
 
 @router.delete(

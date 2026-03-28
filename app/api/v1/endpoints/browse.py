@@ -42,16 +42,8 @@ async def get_home(
     service: BrowseService = Depends(get_browse_service)
 ) -> List[Dict[str, Any]]:
     """Obtiene el contenido de la página principal de YouTube Music."""
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = "music:endpoint:browse:home"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         result = await service.get_home()
-        await set_cached_value(cache_key, result, ttl=1800)
         return result
     except YTMusicServiceException:
         raise
@@ -74,16 +66,8 @@ async def get_artist_albums(
     service: BrowseService = Depends(get_browse_service)
 ) -> Dict[str, Any]:
     """Obtiene todos los álbumes de un artista."""
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:browse:artist:{channel_id}:albums:{params or 'default'}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         result = await service.get_artist_albums(channel_id, params)
-        await set_cached_value(cache_key, result, ttl=3600)
         return result
     except YTMusicServiceException:
         raise
@@ -136,13 +120,6 @@ async def get_album(
     - `stream_url`: URL directa de audio (mejor calidad)
     - `thumbnail`: URL de thumbnail en mejor calidad
     """
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:album:{album_id}:{include_stream_urls}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         album_data = await service.get_album(album_id)
         
@@ -157,11 +134,6 @@ async def get_album(
                     album_data['tracks'] = enriched_tracks
                 elif 'songs' in album_data:
                     album_data['songs'] = enriched_tracks
-        
-        try:
-            await set_cached_value(cache_key, album_data, ttl=1800)
-        except Exception:
-            pass
         
         return album_data
     except YTMusicServiceException:
@@ -183,18 +155,9 @@ async def get_album_browse_id(
     service: BrowseService = Depends(get_browse_service)
 ) -> Dict[str, str]:
     """Obtiene el browse ID de un álbum."""
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:browse:album:{album_id}:browse_id"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         browse_id = await service.get_album_browse_id(album_id)
-        result = {"browse_id": browse_id}
-        await set_cached_value(cache_key, result, ttl=3600)
-        return result
+        return {"browse_id": browse_id}
     except YTMusicServiceException:
         raise
     except Exception as e:
@@ -215,16 +178,8 @@ async def get_song(
     service: BrowseService = Depends(get_browse_service)
 ) -> Dict[str, Any]:
     """Obtiene metadatos completos de una canción."""
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:browse:song:{video_id}:{signature_timestamp or 'default'}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         result = await service.get_song(video_id, signature_timestamp)
-        await set_cached_value(cache_key, result, ttl=3600)
         return result
     except YTMusicServiceException:
         raise
@@ -274,13 +229,7 @@ async def get_song_related(
     - `stream_url`: URL directa de audio (mejor calidad)
     - `thumbnail`: URL de thumbnail en mejor calidad
     """
-    from app.core.cache_redis import get_cached_value, set_cached_value
     from app.core.exceptions import ExternalServiceError, ResourceNotFoundError
-    
-    cache_key = f"music:endpoint:browse:song:{video_id}:related:{include_stream_urls}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
     
     try:
         related_songs = await service.get_song_related(video_id)
@@ -294,7 +243,6 @@ async def get_song_related(
                 include_stream_urls=True
             )
         
-        await set_cached_value(cache_key, related_songs, ttl=3600)
         return related_songs
     except YTMusicServiceException:
         raise
@@ -326,16 +274,8 @@ async def get_lyrics(
     service: BrowseService = Depends(get_browse_service)
 ) -> Dict[str, Any]:
     """Obtiene las letras de una canción."""
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:browse:lyrics:{browse_id}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         result = await service.get_lyrics(browse_id)
-        await set_cached_value(cache_key, result, ttl=86400)
         return result
     except YTMusicServiceException:
         raise
@@ -355,16 +295,8 @@ async def get_lyrics_by_video(
     service: BrowseService = Depends(get_browse_service)
 ) -> Dict[str, Any]:
     """Obtiene las letras de una canción por su video ID."""
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:browse:lyrics:video:{video_id}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         result = await service.get_lyrics_by_video_id(video_id)
-        await set_cached_value(cache_key, result, ttl=86400)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -247,7 +247,7 @@ async def root():
         "status": "online",
         "service": settings.PROJECT_NAME,
         "version": settings.VERSION,
-        "auth": "Browser",
+        "auth": "OAuth",
         "docs": "/docs",
         "api": settings.API_V1_STR
     }

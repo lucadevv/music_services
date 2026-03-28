@@ -9,7 +9,6 @@ from app.schemas.explore import ExploreResponse, MoodCategoriesResponse, MoodPla
 from app.schemas.errors import COMMON_ERROR_RESPONSES
 from app.services.explore_service import ExploreService
 from app.services.stream_service import StreamService
-from app.core.cache import clear_cache
 
 router = APIRouter(tags=["explore"])
 
@@ -136,21 +135,8 @@ async def explore_music(
     Cada categoría en `moods_genres` tiene un campo `params` que puedes usar en `/explore/moods/{params}`.
     """
     import logging
-    import hashlib
-    import json
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    from app.core.config import get_settings
-    from datetime import datetime
     
     logger = logging.getLogger("explore")
-    settings = get_settings()
-    
-    cache_key = f"music:endpoint:explore:{include_stream_urls}:{limit}:{start_index}:{prefetch_count}"
-    
-    cached = await get_cached_value(cache_key)
-    if cached:
-        logger.info("Returning cached explore data")
-        return cached
     
     try:
         home_data = await service.get_home_with_moods()
@@ -266,12 +252,6 @@ async def explore_music(
         }
     }
     
-    # Cachear respuesta por 10 minutos
-    try:
-        await set_cached_value(cache_key, response, ttl=600)
-    except Exception as e:
-        logger.debug(f"Failed to cache explore response: {e}")
-    
     return response
 
 
@@ -320,22 +300,12 @@ async def get_mood_categories(
     - `params`: Usar en `/explore/moods/{params}` para obtener playlists
     - `title`: Nombre de la categoría
     """
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = "music:endpoint:explore:moods:categories"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         categories = await service.get_mood_categories()
-        response = {
+        return {
             "categories": categories,
             "structure": "Las categorías están organizadas en secciones: 'For you', 'Genres', 'Moods & moments'"
         }
-        # Cache por 30 minutos (los moods no cambian frecuentemente)
-        await set_cached_value(cache_key, response, ttl=1800)
-        return response
     except YTMusicServiceException:
         raise
     except Exception as e:
@@ -375,20 +345,11 @@ async def get_mood_playlists(
     Usa los `params` de una categoría obtenida en `/explore/moods` o `/explore`.
     Los params son valores codificados como `ggMPOg1uX1JOQWZFeDByc2Jm`.
     """
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:explore:moods:{params}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         result = await service.get_mood_playlists(params)
-        response = {
+        return {
             "playlists": result
         }
-        await set_cached_value(cache_key, response, ttl=3600)
-        return response
     except YTMusicServiceException:
         raise
     except Exception as e:
@@ -447,13 +408,6 @@ async def get_charts(
     - `stream_url`: URL directa de audio (mejor calidad)
     - `thumbnail`: URL de thumbnail en mejor calidad
     """
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:charts:{country or 'global'}:{include_stream_urls}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         charts = await service.get_charts(country)
         
@@ -489,11 +443,6 @@ async def get_charts(
             "trending": trending_data,
             "country": country or "global"
         }
-        
-        try:
-            await set_cached_value(cache_key, response, ttl=600)
-        except Exception:
-            pass
         
         return response
     except YTMusicServiceException:

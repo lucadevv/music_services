@@ -92,39 +92,26 @@ class TestPlaylistsExceptionHandling:
         assert response.status_code == 502
 
     def test_playlist_ytservice_exception_in_cache_raises(self):
-        """Test that YTMusicServiceException in cache section is re-raised."""
-        # This test verifies the fix where YTMusicServiceException in cache section
-        # is now properly re-raised instead of being caught by generic Exception
+        """Test that YTMusicServiceException from service is properly handled.
+        
+        Note: Endpoint-level cache was removed — stream URLs are now only
+        cached at the service layer. This test verifies that YTMusicServiceException
+        raised by the playlist service is properly handled by the exception handler.
+        """
         mock_service = MockPlaylistService()
-        mock_service._get_playlist_return = {
-            "title": "Test Playlist",
-            "tracks": []
-        }
+        mock_service._get_playlist_side_effect = YTMusicServiceException(
+            message="Service error",
+            details={"operation": "get_playlist"}
+        )
         
         app.dependency_overrides[get_playlist_service] = lambda: mock_service
         app.dependency_overrides[get_stream_service] = lambda: MockStreamService()
         
-        # Mock the cache to raise YTMusicServiceException
-        with patch("app.core.cache_redis.set_cached_value") as mock_set_cache:
-            mock_set_cache.side_effect = YTMusicServiceException(
-                message="Cache error",
-                details={"operation": "set_cached_value"}
-            )
+        with TestClient(app) as client:
+            response = client.get("/api/v1/playlists/PLtest?include_stream_urls=false")
             
-            with TestClient(app) as client:
-                # This should raise the YTMusicServiceException (which gets handled by exception handler)
-                response = client.get("/api/v1/playlists/PLtest?include_stream_urls=false")
-                
-                # Since we're mocking the cache to raise YTMusicServiceException,
-                # and the fix re-raises it, it should be handled by the exception handler
-                # and return a 500 (since YTMusicServiceException defaults to 500)
-                # But actually, let's check what the exception handler does...
-                # Looking at the exception handler, it should convert YTMusicServiceException
-                # to appropriate status code based on the specific exception type
-                
-                # For this test, we're mainly verifying that the exception doesn't get
-                # swallowed by the generic Exception handler in the cache section
-                assert response.status_code == 500  # Default for YTMusicServiceException
+            # YTMusicServiceException defaults to 500
+            assert response.status_code == 500
 
 
 class TestOpenAPIYAML:

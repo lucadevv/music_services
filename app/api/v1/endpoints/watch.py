@@ -125,13 +125,6 @@ async def get_watch_playlist(
             if current_time - cached_time < _REQUEST_TTL:
                 return cached_result
     
-    from app.core.cache_redis import get_cached_value, set_cached_value
-    
-    cache_key = f"music:endpoint:watch:{video_id or ''}:{playlist_id or ''}:{limit}:{start_index}:{radio}:{shuffle}:{include_stream_urls}:{prefetch_count}"
-    cached = await get_cached_value(cache_key)
-    if cached:
-        return cached
-    
     try:
         playlist_data = await service.get_watch_playlist(
             video_id=video_id,
@@ -187,11 +180,6 @@ async def get_watch_playlist(
                     playlist_data['tracks'] = tracks
                 elif 'items' in playlist_data:
                     playlist_data['items'] = tracks
-        
-        try:
-            await set_cached_value(cache_key, playlist_data, ttl=300)
-        except Exception:
-            pass
         
         # Guardar en cache en memoria para deduplicación
         async with _request_lock:
