@@ -53,17 +53,25 @@ logger = logging.getLogger(__name__)
 )
 async def get_stats() -> Dict[str, Any]:
     """Obtiene estadísticas completas del servicio."""
-    from app.core.config import get_settings
-    from app.core.cache import get_cache_stats
-    from app.core.circuit_breaker import youtube_stream_circuit
-    from app.core.background_cache import cache_manager
+    try:
+        from app.core.config import get_settings
+        from app.core.cache import get_cache_stats
+        from app.core.circuit_breaker import youtube_stream_circuit
+        from app.core.background_cache import cache_manager
+    except Exception as e:
+        logger.error(f"Failed to import required modules: {e}")
+        return {
+            "service": "YouTube Music Service",
+            "error": f"Configuration not available: {str(e)}"
+        }
 
     try:
         settings = get_settings()
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to get settings: {e}")
         return {
             "service": "YouTube Music Service",
-            "error": "Configuration not available"
+            "error": f"Configuration not available: {str(e)}"
         }
 
     try:

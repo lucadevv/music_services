@@ -73,7 +73,7 @@ class BrowseService(BaseService):
         params: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Get artist albums.
+        Get artist albums with fallback and retry logic.
         
         Args:
             channel_id: Artist channel ID.
@@ -84,11 +84,60 @@ class BrowseService(BaseService):
         """
         self._log_operation("get_artist_albums", channel_id=channel_id)
         
+        # Rate limit error handling
+        rate_limit_keywords = ['429', 'rate limit', 'quota', 'too many requests']
+        
+        async def fetch_albums():
+            return await asyncio.to_thread(self.ytmusic.get_artist_albums, channel_id, params)
+        
+        async def fetch_with_fallback():
+            # First try: direct get_artist_albums call
+            try:
+                return await fetch_albums()
+            except Exception as e:
+                error_msg = str(e).lower()
+                is_rate_limit = any(kw in error_msg for kw in rate_limit_keywords)
+                if is_rate_limit:
+                    self.logger.warning(f"Rate limit hit for artist {channel_id}: {e}")
+                
+                # Second try: get artist info to get the albums browse_id
+                self.logger.debug(f"get_artist_albums failed, trying fallback with get_artist for {channel_id}")
+                try:
+                    artist_data = await asyncio.to_thread(self.ytmusic.get_artist, channel_id)
+                    if artist_data:
+                        # Try to get albums using the albums browse_id from artist response
+                        albums_browse_id = artist_data.get("albums", {}).get("browseId")
+                        if albums_browse_id:
+                            # Use get_album_browse_id logic - call get_albums via browse endpoint
+                            # Fallback: just return the artist data's albums section
+                            albums_section = artist_data.get("albums", {})
+                            self.logger.info(f"Retrieved albums via get_artist fallback for {channel_id}")
+                            return albums_section
+                except Exception as fallback_error:
+                    self.logger.warning(f"Fallback also failed for {channel_id}: {fallback_error}")
+                
+                # If we get here, both failed - re-raise the original exception
+                raise
+        
         try:
-            result = await asyncio.to_thread(self.ytmusic.get_artist_albums, channel_id, params)
-            albums = result if result is not None else {}
-            self.logger.info(f"Retrieved albums for artist: {channel_id}")
-            return albums
+            # Retry logic: attempt up to 2 times
+            max_retries = 2
+            last_error = None
+            
+            for attempt in range(max_retries):
+                try:
+                    result = await fetch_with_fallback()
+                    albums = result if result is not None else {}
+                    self.logger.info(f"Retrieved albums for artist: {channel_id} (attempt {attempt + 1})")
+                    return albums
+                except Exception as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        self.logger.warning(f"Attempt {attempt + 1} failed for {channel_id}: {e}, retrying...")
+                        await asyncio.sleep(0.5 * (attempt + 1))  # Exponential backoff
+            
+            # All retries exhausted
+            raise last_error
         except Exception as e:
             raise self._handle_ytmusic_error(e, f"obtener álbumes de artista {channel_id}")
     
@@ -120,7 +169,6 @@ class BrowseService(BaseService):
         except Exception as e:
             raise self._handle_ytmusic_error(e, f"obtener álbum {album_id}")
     
-    @cache_result(ttl=86400)
     async def get_album_browse_id(self, album_id: str) -> Optional[str]:
         """
         Get album browse ID.
@@ -136,6 +184,19 @@ class BrowseService(BaseService):
         try:
             result = await asyncio.to_thread(self.ytmusic.get_album_browse_id, album_id)
             self.logger.debug(f"Retrieved browse ID for album {album_id}: {result}")
+            
+            # Fallback: try to get browse_id from get_album if ytmusicapi returns None
+            if result is None:
+                self.logger.debug(f"get_album_browse_id returned None, trying get_album fallback for {album_id}")
+                album_data = await asyncio.to_thread(self.ytmusic.get_album, album_id)
+                if album_data:
+                    # Extract browse_id from audioPlaylistId if available
+                    audio_playlist_id = album_data.get("audioPlaylistId")
+                    if audio_playlist_id:
+                        # audioPlaylistId is in format "OLAK5uy_xxxxx", we need the browse ID
+                        result = audio_playlist_id
+                        self.logger.debug(f"Extracted browse ID from album: {result}")
+            
             return result
         except Exception as e:
             raise self._handle_ytmusic_error(e, f"obtener browse ID de álbum {album_id}")

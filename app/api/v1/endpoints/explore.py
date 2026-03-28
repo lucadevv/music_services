@@ -454,8 +454,8 @@ async def get_charts(
 @router.get(
     "/category/{category_params}",
     response_model=Dict[str, Any],
-    summary="Get category playlists (alias)",
-    description="Alias para `/explore/moods/{params}`. Obtiene playlists de una categoría.",
+    summary="Get category playlists (alias) - DEPRECATED",
+    description="Alias para `/explore/moods/{params}`. Obtiene playlists de una categoría. ⚠️ ENDPOINT DEPRECADO - usar `/explore/moods/{params}` en su lugar.",
     response_description="Lista de playlists de la categoría",
     responses={200: {"description": "Playlists obtenidas exitosamente"}, **COMMON_ERROR_RESPONSES}
 )
@@ -466,13 +466,17 @@ async def get_category(
     """
     Obtiene playlists de una categoría (alias de `/explore/moods/{params}`).
     
+    ⚠️ ENDPOINT DEPRECADO: Usa `/explore/moods/{params}` en su lugar.
+    
     Usa el `params` de una categoría de mood/género para obtener sus playlists.
     """
+    from fastapi.responses import JSONResponse
     try:
         result = await service.get_mood_playlists(category_params)
-        return {
-            "playlists": result
-        }
+        return JSONResponse(
+            content={"playlists": result},
+            headers={"Warning": "299 - \"Deprecated: Use /explore/moods/{params} instead\""}
+        )
     except YTMusicServiceException:
         raise
     except Exception as e:
