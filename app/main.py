@@ -182,6 +182,8 @@ cors_origins = ["*"] if settings.CORS_ORIGINS == "*" else settings.CORS_ORIGINS.
 cors_methods = ["*"] if settings.CORS_ALLOW_METHODS == "*" else settings.CORS_ALLOW_METHODS.split(",")
 cors_headers = ["*"] if settings.CORS_ALLOW_HEADERS == "*" else settings.CORS_ALLOW_HEADERS.split(",")
 
+app.add_middleware(AuthMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -189,8 +191,6 @@ app.add_middleware(
     allow_methods=cors_methods,
     allow_headers=cors_headers,
 )
-
-app.add_middleware(AuthMiddleware)
 
 
 @app.middleware("http")
