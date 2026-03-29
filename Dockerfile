@@ -1,8 +1,11 @@
-# Multi-stage build for YouTube Music API Service
+# Multi-stage Dockerfile for YouTube Music Service
+
+# Builder stage
 FROM python:3.11-slim AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     gcc \
     g++ \
     make \
@@ -34,15 +37,16 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 # Set working directory
 WORKDIR /app
 
-# Copy Python dependencies from builder
+# Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY --chown=appuser:appuser . .
 
-# Create oauth directory (mounted as volume at runtime)
-RUN mkdir -p /app/oauth && chown appuser:appuser /app/oauth
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/browser /app/data && \
+    chown -R appuser:appuser /app/browser /app/data
 
 # Switch to non-root user
 USER appuser
@@ -57,7 +61,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 ENTRYPOINT ["bash", "/app/scripts/docker-entrypoint.sh"]
 
 # Run the application with uvicorn workers
-CMD ["python", "servicio_ytmusic.py"]
-
-# For Kubernetes/HPA, use:
-# CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
