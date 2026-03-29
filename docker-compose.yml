@@ -41,60 +41,15 @@ services:
       - ENABLE_COMPRESSION=${ENABLE_COMPRESSION:-true}
       - HTTP_TIMEOUT=${HTTP_TIMEOUT:-30}
       - MAX_WORKERS=${MAX_WORKERS:-4}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-music_user}:${POSTGRES_PASSWORD:-music_password}@postgres:5432/${POSTGRES_DB:-music_db}
     volumes:
       - browser_data:/app/browser
     depends_on:
       ytmusic_redis:
         condition: service_healthy
-    networks:
-      - music_app_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    deploy:
-      resources:
-        limits:
-          cpus: '4.0'
-          memory: 2G
-        reservations:
-          cpus: '2.0'
-          memory: 1G
-
-  # Perfil de desarrollo con hot reload
-  music_services_dev:
-    profiles:
-      - dev
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production  # Usamos el mismo, pero con volume mount
-    container_name: music_app_fastapi_dev
-    restart: unless-stopped
-    ports:
-      - "${PORT:-8000}:8000"
-    environment:
-      - HOST=0.0.0.0
-      - PORT=8000
-      - BROWSER_ACCOUNTS_DIR=/app/browser
-      - ADMIN_SECRET_KEY=${ADMIN_SECRET_KEY}
-      - CORS_ORIGINS=${CORS_ORIGINS:-*}
-      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-false}
-      - CACHE_ENABLED=${CACHE_ENABLED:-true}
-      - CACHE_BACKEND=${CACHE_BACKEND:-redis}
-      - CACHE_TTL=${CACHE_TTL:-300}
-      - REDIS_HOST=ytmusic_redis
-      - REDIS_PORT=6379
-      - REDIS_DB=${REDIS_DB:-0}
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-      - ENABLE_COMPRESSION=${ENABLE_COMPRESSION:-true}
-      - HTTP_TIMEOUT=${HTTP_TIMEOUT:-30}
-      - MAX_WORKERS=${MAX_WORKERS:-1}
+      postgres:
+        condition: service_healthy
     volumes:
-      - ./:/app
-      - /app/__pycache__
       - browser_data:/app/browser
     depends_on:
       ytmusic_redis:
@@ -108,6 +63,36 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  # PostgreSQL para API Keys
+  postgres:
+    image: postgres:15-alpine
+    container_name: music_postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_EXTERNAL_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-music_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-music_password}
+      - POSTGRES_DB=${POSTGRES_DB:-music_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - music_app_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-music_user} -d ${POSTGRES_DB:-music_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
 
   # Redis dedicado para YTMusic cache
   ytmusic_redis:
@@ -145,4 +130,6 @@ volumes:
   ytmusic_redis_data:
     driver: local
   browser_data:
+    driver: local
+  postgres_data:
     driver: local

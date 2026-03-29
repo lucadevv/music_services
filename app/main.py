@@ -15,7 +15,9 @@ from slowapi.errors import RateLimitExceeded
 import yaml
 
 # Local imports
+from app.core.auth_middleware import AuthMiddleware
 from app.core.config import get_settings
+
 from app.core.logging_config import setup_logging, get_logger
 from app.core.exceptions import YTMusicServiceException
 from app.core.exception_handlers import (
@@ -26,10 +28,20 @@ from app.core.exception_handlers import (
 from app.api.v1.router import api_router
 from app.core.background_cache import cache_manager
 from app.core.ytmusic_client import is_authenticated
+from app.core.auth_middleware import AuthMiddleware
 
 # Setup logging first
 setup_logging()
 logger = get_logger(__name__)
+
+settings = get_settings()
+
+
+app.add_middleware(AuthMiddleware)
+
+settings = get_settings()
+
+app.add_middleware(AuthMiddleware)
 
 settings = get_settings()
 
@@ -79,6 +91,15 @@ async def lifespan(app: FastAPI):
     logger.info(f"Rate Limiting: {'Enabled' if settings.RATE_LIMIT_ENABLED else 'Disabled'}")
     logger.info(f"Caching: {'Enabled' if settings.CACHE_ENABLED else 'Disabled'}")
     logger.info(f"Compression: {'Enabled' if settings.ENABLE_COMPRESSION else 'Disabled'}")
+    
+    # Initialize database
+    from app.core.database import init_db
+    await init_db()
+    logger.info("✅ Database initialized")
+    
+    # Initialize admin API key from env
+    from app.core.database import create_admin_key_from_env
+    await create_admin_key_from_env()
     
     # Iniciar gestor de cache en background
     await cache_manager.start()

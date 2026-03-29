@@ -1,7 +1,7 @@
 """API v1 router."""
 from fastapi import APIRouter
 from app.api.v1.endpoints import (
-    auth,
+    api_keys,
     browse,
     explore,
     search,
@@ -12,10 +12,14 @@ from app.api.v1.endpoints import (
     stats
 )
 
+from app.core.config import get_settings
+
+settings = get_settings()
+
 api_router = APIRouter()
 
 # Include all endpoint routers
-api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(api_keys.router, prefix="/api-keys", tags=["api-keys"])
 api_router.include_router(browse.router, prefix="/browse", tags=["browse"])
 api_router.include_router(explore.router, prefix="/explore", tags=["explore"])
 api_router.include_router(search.router, prefix="/search", tags=["search"])

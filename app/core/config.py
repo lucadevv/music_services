@@ -13,16 +13,12 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "YouTube Music Service"
     VERSION: str = "1.0.0"
     
-    # Browser authentication
-    BROWSER_ACCOUNTS_DIR: str = "/app/browser"
-    
-    # Admin
-    ADMIN_SECRET_KEY: Optional[str] = None
-    
-    CORS_ORIGINS: str = "*"
-    CORS_ALLOW_CREDENTIALS: bool = True
-    CORS_ALLOW_METHODS: str = "*"
-    CORS_ALLOW_HEADERS: str = "*"
+    # PostgreSQL
+    POSTGRES_host: str = "postgres"
+    postgres_port: int = 5432
+    postgres_user: str = "music_user"
+    postgres_password: str = "music_password"
+    postgres_db: str = "music_db"
     
     HOST: str = "0.0.0.0"
     PORT: int = 8000
