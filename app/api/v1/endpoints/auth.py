@@ -21,6 +21,14 @@ from app.schemas.auth import (
     BrowserTestResponse,
     AuthStatusResponse,
 )
+from app.schemas.api_keys import (
+    APIKeyCreate,
+    APIKeyResponse,
+    APIKeyUpdate,
+    APIKeyListResponse,
+    APIKeyVerifyResponse,
+)
+from app.core.api_keys import get_api_key_manager
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -415,3 +423,256 @@ async def get_auth_status_endpoint(
     """Get authentication status."""
     status = get_auth_status()
     return AuthStatusResponse(**status)
+
+
+# ============================================================================
+# API Keys Management Endpoints
+# ============================================================================
+
+
+@router.post(
+    "/api-keys",
+    response_model=APIKeyResponse,
+    summary="Crear nueva API key",
+    description="""
+Crea una nueva API key para acceso a la API.
+
+**Requiere:** `X-Admin-Key` header con la clave maestra.
+
+**Ejemplo de uso:**
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/api-keys \\
+  -H "X-Admin-Key: your-master-key" \\
+  -H "Content-Type: application/json" \\
+  -d '{"title": "Mobile App"}'
+```
+    """,
+    responses={
+        **FORBIDDEN_RESPONSE,
+        201: {
+            "description": "API key creada",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "key_id": "abc123",
+                        "api_key": "sk_live_xyz...",
+                        "title": "Mobile App",
+                        "enabled": True,
+                        "created_at": "2026-03-29T10:00:00Z",
+                        "is_master": False,
+                    }
+                }
+            },
+        },
+    },
+)
+async def create_api_key(
+    request: APIKeyCreate,
+    _verified: None = Depends(verify_admin_key),
+):
+    """Create a new API key."""
+    from app.core.api_keys import get_api_key_manager
+    
+    manager = get_api_key_manager()
+    api_key = await manager.create(title=request.title, api_key=request.api_key)
+    
+    return APIKeyResponse(
+        key_id=api_key.key_id,
+        api_key=api_key.api_key,
+        title=api_key.title,
+        enabled=api_key.enabled,
+        created_at=api_key.created_at,
+        last_used=api_key.last_used,
+        is_master=api_key.is_master,
+    )
+
+
+@router.get(
+    "/api-keys",
+    response_model=APIKeyListResponse,
+    summary="Listar API keys",
+    description="""
+Lista todas las API keys registradas.
+
+**Requiere:** `X-Admin-Key` header.
+    """,
+    responses={**FORBIDDEN_RESPONSE},
+)
+async def list_api_keys(
+    _verified: None = Depends(verify_admin_key),
+):
+    """List all API keys."""
+    from app.core.api_keys import get_api_key_manager
+    
+    manager = get_api_key_manager()
+    keys = await manager.list()
+    
+    return APIKeyListResponse(
+        total=len(keys),
+        keys=[
+            APIKeyResponse(
+                key_id=k.key_id,
+                api_key=k.api_key[:20] + "...",  # Mask API key in list
+                title=k.title,
+                enabled=k.enabled,
+                created_at=k.created_at,
+                last_used=k.last_used,
+                is_master=k.is_master,
+            )
+            for k in keys
+        ],
+    )
+
+
+@router.get(
+    "/api-keys/{key_id}",
+    response_model=APIKeyResponse,
+    summary="Obtener API key",
+    description="""
+Obtiene los detalles de una API key específica.
+
+**Requiere:** `X-Admin-Key` header.
+    """,
+    responses={
+        **FORBIDDEN_RESPONSE,
+        404: {"description": "API key no encontrada"},
+    },
+)
+async def get_api_key(
+    key_id: str,
+    _verified: None = Depends(verify_admin_key),
+):
+    """Get a specific API key."""
+    from app.core.api_keys import get_api_key_manager
+    
+    manager = get_api_key_manager()
+    api_key = await manager.get_by_id(key_id)
+    
+    if not api_key:
+        raise HTTPException(
+            status_code=404,
+            detail="API key no encontrada",
+        )
+    
+    return APIKeyResponse(
+        key_id=api_key.key_id,
+        api_key=api_key.api_key,
+        title=api_key.title,
+        enabled=api_key.enabled,
+        created_at=api_key.created_at,
+        last_used=api_key.last_used,
+        is_master=api_key.is_master,
+    )
+
+
+@router.patch(
+    "/api-keys/{key_id}",
+    response_model=APIKeyResponse,
+    summary="Actualizar API key",
+    description="""
+Actualiza el título o estado (habilitado/inhabilitado) de una API key.
+
+**Requiere:** `X-Admin-Key` header.
+    """,
+    responses={
+        **FORBIDDEN_RESPONSE,
+        404: {"description": "API key no encontrada"},
+        400: {"description": "No se pueden modificar API keys maestras"},
+    },
+)
+async def update_api_key(
+    key_id: str,
+    request: APIKeyUpdate,
+    _verified: None = Depends(verify_admin_key),
+):
+    """Update an API key."""
+    from app.core.api_keys import get_api_key_manager
+    
+    manager = get_api_key_manager()
+    api_key = await manager.update(
+        key_id,
+        title=request.title,
+        enabled=request.enabled,
+    )
+    
+    if not api_key:
+        raise HTTPException(
+            status_code=404,
+            detail="API key no encontrada",
+        )
+    
+    return APIKeyResponse(
+        key_id=api_key.key_id,
+        api_key=api_key.api_key,
+        title=api_key.title,
+        enabled=api_key.enabled,
+        created_at=api_key.created_at,
+        last_used=api_key.last_used,
+        is_master=api_key.is_master,
+    )
+
+
+@router.delete(
+    "/api-keys/{key_id}",
+    summary="Eliminar API key",
+    description="""
+Elimina una API key.
+
+**Nota:** No se pueden eliminar API keys maestras.
+
+**Requiere:** `X-Admin-Key` header.
+    """,
+    responses={
+        **FORBIDDEN_RESPONSE,
+        404: {"description": "API key no encontrada"},
+        400: {"description": "No se puede eliminar la API key maestra"},
+    },
+)
+async def delete_api_key(
+    key_id: str,
+    _verified: None = Depends(verify_admin_key),
+):
+    """Delete an API key."""
+    from app.core.api_keys import get_api_key_manager
+    
+    manager = get_api_key_manager()
+    success = await manager.delete(key_id)
+    
+    if not success:
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede eliminar la API key maestra o no existe",
+        )
+    
+    return {"success": True, "message": "API key eliminada"}
+
+
+@router.post(
+    "/api-keys/verify",
+    response_model=APIKeyVerifyResponse,
+    summary="Verificar API key",
+    description="""
+Verifica si una API key es válida y está habilitada.
+
+**Requiere:** `X-Admin-Key` header.
+    """,
+    responses={**FORBIDDEN_RESPONSE},
+)
+async def verify_api_key_endpoint(
+    api_key: str,
+    _verified: None = Depends(verify_admin_key),
+):
+    """Verify an API key."""
+    from app.core.api_keys import get_api_key_manager
+    
+    manager = get_api_key_manager()
+    api_key_obj = await manager.get_by_key(api_key)
+    
+    if not api_key_obj:
+        return APIKeyVerifyResponse(valid=False)
+    
+    return APIKeyVerifyResponse(
+        valid=api_key_obj.enabled,
+        key_id=api_key_obj.key_id,
+        title=api_key_obj.title,
+    )

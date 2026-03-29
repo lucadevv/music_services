@@ -116,15 +116,71 @@ Esto elimina los 403 que ocurrían cuando YouTube expira las URLs (~6h) y el end
 | GET | `/podcasts/episode/{browse_id}` | Get episode |
 | GET | `/podcasts/episodes/{browse_id}/playlist` | Get episodes playlist |
 
-### Auth
+### Autenticación
 
-| Method | Route | Summary |
-|--------|-------|---------|
-| POST | `/auth/credentials` | Save OAuth credentials |
-| GET | `/auth/credentials` | Check credentials status |
-| POST | `/auth/oauth/start` | Start OAuth flow |
-| POST | `/auth/oauth/poll` | Poll OAuth authorization |
-| GET | `/auth/status` | Auth status |
+El servicio usa **API Keys** para autenticación de administrador.
+
+### Endpoints de Autenticación (`/api/v1/auth/*`)
+
+**API Keys** - Gestión de claves API con rotación y control granular:
+
+1. **POST /auth/api-keys** - Crear nueva API key
+2. **GET /auth/api-keys** - Listar todas las API keys
+3. **GET /auth/api-keys/{key_id}** - Obtener API key específica
+4. **PATCH /auth/api-keys/{key_id}** - Actualizar API key (título, habilitado/inhabilitado)
+5. **DELETE /auth/api-keys/{key_id}** - Eliminar API key
+6. **POST /auth/api-keys/verify** - Verificar si una API key es válida
+
+**Browser Authentication** - Gestión de cuentas de YouTube Music:
+
+1. **POST /auth/browser/from-url** - Agregar cuenta desde URL
+2. **POST /auth/browser/from-headers** - Agregar cuenta desde headers
+3. **GET /auth/browser** - Listar cuentas
+4. **DELETE /auth/browser/{account_name}** - Eliminar cuenta
+5. **POST /auth/browser/test** - Probar autenticación
+6. **GET /auth/status** - Estado de autenticación
+
+### Primer Uso
+
+**Al iniciar el servicio por primera vez:**
+
+1. Se crea automáticamente una **API key maestra** si no existe ninguna
+2. Revisa los logs del contenedor para obtener la API key maestra:
+   ```bash
+   docker-compose logs api | grep "Master API key"
+   ```
+3. Usá esa API key en el header `X-Admin-Key` para todos los endpoints de admin
+
+**Crear nuevas API keys:**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/api-keys \
+  -H "X-Admin-Key: your-master-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Mobile App"}'
+```
+
+**Respuesta:**
+```json
+{
+  "key_id": "abc123def456",
+  "api_key": "sk_live_1a2b3c4d5e6f7g8h9i0j",
+  "title": "Mobile App",
+  "enabled": true,
+  "created_at": "2026-03-29T10:00:00Z",
+  "is_master": false
+}
+```
+
+**Usar API key:**
+```bash
+curl http://localhost:8000/api/v1/auth/browser \
+  -H "X-Admin-Key: sk_live_1a2b3c4d5e6f7g8h9i0j"
+```
+
+### Retrocompatibilidad
+
+Si tenés `ADMIN_SECRET_KEY` configurado en `.env`, seguirá funcionando. Pero te recomendamos migrar a API keys para mejor control y auditoría.
 
 ### Stats
 
