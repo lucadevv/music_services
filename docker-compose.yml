@@ -47,7 +47,8 @@ services:
       - HTTP_TIMEOUT=${HTTP_TIMEOUT:-30}
       - MAX_WORKERS=${MAX_WORKERS:-4}
     volumes:
-      - browser_data:/app/browser
+      - ./browser:/app/browser
+      - ./data:/app/data
     depends_on:
       music_redis:
         condition: service_healthy
@@ -97,9 +98,10 @@ services:
       - HTTP_TIMEOUT=${HTTP_TIMEOUT:-30}
       - MAX_WORKERS=${MAX_WORKERS:-1}
     volumes:
+      - ./browser:/app/browser
+      - ./data:/app/data
       - ./:/app
       - /app/__pycache__
-      - browser_data:/app/browser
     depends_on:
       music_redis:
         condition: service_healthy
@@ -163,8 +165,4 @@ networks:
 
 volumes:
   redis_data:
-    driver: local
-  browser_data:
-    driver: local
   postgres_data:
-    driver: local
