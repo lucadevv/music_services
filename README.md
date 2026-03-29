@@ -125,6 +125,13 @@ El servicio separa autenticación de **música** y **admin**:
 - Endpoints de admin (`/auth/*`, `/api-keys/*`, `/stats/*`) requieren:
   - `X-Admin-Key: <ADMIN_SECRET_KEY>`
 
+Ejemplo para endpoints de música:
+
+```bash
+curl -H "Authorization: Bearer sk_live_tu_api_key" \
+  "http://localhost:8000/api/v1/search/?q=eminem"
+```
+
 ### Endpoints de Autenticación (`/api/v1/auth/*`)
 
 **API Keys** - Gestión de claves API con rotación y control granular:

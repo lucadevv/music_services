@@ -1,11 +1,15 @@
 """Browser authentication endpoints for admin panel."""
 import json
 import logging
+import secrets
 import time
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 import httpx
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.browser_client import (
@@ -28,7 +32,7 @@ from app.schemas.api_keys import (
     APIKeyListResponse,
     APIKeyVerifyResponse,
 )
-from app.core.api_keys import get_api_key_manager
+from app.core.database import get_db
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -373,7 +377,11 @@ async def test_authentication(
     """Test authentication with YouTube Music."""
     try:
         client = get_ytmusic()
-        result = client.get_search_suggestions("test", ignore_spelling=True)
+        # ytmusicapi changed this signature across versions. Use a safe fallback.
+        try:
+            client.get_search_suggestions("test", ignore_spelling=True)
+        except TypeError:
+            client.get_search_suggestions("test")
         
         manager = get_browser_manager()
         available = manager.get_available_accounts()
@@ -459,7 +467,7 @@ curl -X POST http://localhost:8000/api/v1/auth/api-keys \\
                         "title": "Mobile App",
                         "enabled": True,
                         "created_at": "2026-03-29T10:00:00Z",
-                        "is_master": False,
+                        "is_admin": False,
                     }
                 }
             },
@@ -468,22 +476,36 @@ curl -X POST http://localhost:8000/api/v1/auth/api-keys \\
 )
 async def create_api_key(
     request: APIKeyCreate,
+    db: AsyncSession = Depends(get_db),
     _verified: None = Depends(verify_admin_key),
 ):
     """Create a new API key."""
-    from app.core.api_keys import get_api_key_manager
-    
-    manager = get_api_key_manager()
-    api_key = await manager.create(title=request.title)
-    
+    api_key = f"sk_live_{secrets.token_urlsafe(24)}"
+    key_id = secrets.token_urlsafe(8)
+
+    await db.execute(
+        text("""
+            INSERT INTO api_keys (key_id, api_key, title, description, enabled, is_admin)
+            VALUES (:key_id, :api_key, :title, :description, true, false)
+        """),
+        {
+            "key_id": key_id,
+            "api_key": api_key,
+            "title": request.title,
+            "description": request.description,
+        }
+    )
+    await db.commit()
+
     return APIKeyResponse(
-        key_id=api_key.key_id,
-        api_key=api_key.api_key,
-        title=api_key.title,
-        enabled=api_key.enabled,
-        created_at=api_key.created_at,
-        last_used=api_key.last_used,
-        is_master=api_key.is_master,
+        key_id=key_id,
+        api_key=api_key,
+        title=request.title,
+        description=request.description,
+        enabled=True,
+        created_at=datetime.now(),
+        last_used=None,
+        is_admin=False,
     )
 
 
@@ -499,27 +521,29 @@ Lista todas las API keys registradas.
     responses={**FORBIDDEN_RESPONSE},
 )
 async def list_api_keys(
+    db: AsyncSession = Depends(get_db),
     _verified: None = Depends(verify_admin_key),
 ):
     """List all API keys."""
-    from app.core.api_keys import get_api_key_manager
-    
-    manager = get_api_key_manager()
-    keys = await manager.list_all()
-    
+    result = await db.execute(
+        text("SELECT key_id, api_key, title, description, enabled, is_admin, created_at, last_used FROM api_keys")
+    )
+    rows = result.fetchall()
+
     return APIKeyListResponse(
-        total=len(keys),
+        total=len(rows),
         keys=[
             APIKeyResponse(
-                key_id=k.key_id,
-                api_key=k.api_key[:20] + "...",  # Mask API key in list
-                title=k.title,
-                enabled=k.enabled,
-                created_at=k.created_at,
-                last_used=k.last_used,
-                is_master=k.is_master,
+                key_id=row[0],
+                api_key=row[1][:20] + "...",
+                title=row[2],
+                description=row[3],
+                enabled=row[4],
+                is_admin=row[5],
+                created_at=row[6],
+                last_used=row[7],
             )
-            for k in keys
+            for row in rows
         ],
     )
 
@@ -540,28 +564,31 @@ Obtiene los detalles de una API key específica.
 )
 async def get_api_key(
     key_id: str,
+    db: AsyncSession = Depends(get_db),
     _verified: None = Depends(verify_admin_key),
 ):
     """Get a specific API key."""
-    from app.core.api_keys import get_api_key_manager
-    
-    manager = get_api_key_manager()
-    api_key = await manager.get_by_id(key_id)
-    
-    if not api_key:
+    result = await db.execute(
+        text("SELECT key_id, api_key, title, description, enabled, is_admin, created_at, last_used FROM api_keys WHERE key_id = :key_id"),
+        {"key_id": key_id}
+    )
+    row = result.fetchone()
+
+    if not row:
         raise HTTPException(
             status_code=404,
             detail="API key no encontrada",
         )
     
     return APIKeyResponse(
-        key_id=api_key.key_id,
-        api_key=api_key.api_key,
-        title=api_key.title,
-        enabled=api_key.enabled,
-        created_at=api_key.created_at,
-        last_used=api_key.last_used,
-        is_master=api_key.is_master,
+        key_id=row[0],
+        api_key=row[1],
+        title=row[2],
+        description=row[3],
+        enabled=row[4],
+        is_admin=row[5],
+        created_at=row[6],
+        last_used=row[7],
     )
 
 
@@ -583,32 +610,48 @@ Actualiza el título o estado (habilitado/inhabilitado) de una API key.
 async def update_api_key(
     key_id: str,
     request: APIKeyUpdate,
+    db: AsyncSession = Depends(get_db),
     _verified: None = Depends(verify_admin_key),
 ):
     """Update an API key."""
-    from app.core.api_keys import get_api_key_manager
-    
-    manager = get_api_key_manager()
-    api_key = await manager.update(
-        key_id,
-        title=request.title,
-        enabled=request.enabled,
+    await db.execute(
+        text("""
+            UPDATE api_keys
+            SET title = COALESCE(:title, title),
+                description = COALESCE(:description, description),
+                enabled = COALESCE(:enabled, enabled)
+            WHERE key_id = :key_id
+        """),
+        {
+            "key_id": key_id,
+            "title": request.title,
+            "description": request.description,
+            "enabled": request.enabled,
+        }
     )
-    
-    if not api_key:
+    await db.commit()
+
+    result = await db.execute(
+        text("SELECT key_id, api_key, title, description, enabled, is_admin, created_at, last_used FROM api_keys WHERE key_id = :key_id"),
+        {"key_id": key_id}
+    )
+    row = result.fetchone()
+
+    if not row:
         raise HTTPException(
             status_code=404,
             detail="API key no encontrada",
         )
     
     return APIKeyResponse(
-        key_id=api_key.key_id,
-        api_key=api_key.api_key,
-        title=api_key.title,
-        enabled=api_key.enabled,
-        created_at=api_key.created_at,
-        last_used=api_key.last_used,
-        is_master=api_key.is_master,
+        key_id=row[0],
+        api_key=row[1],
+        title=row[2],
+        description=row[3],
+        enabled=row[4],
+        is_admin=row[5],
+        created_at=row[6],
+        last_used=row[7],
     )
 
 
@@ -630,20 +673,31 @@ Elimina una API key.
 )
 async def delete_api_key(
     key_id: str,
+    db: AsyncSession = Depends(get_db),
     _verified: None = Depends(verify_admin_key),
 ):
     """Delete an API key."""
-    from app.core.api_keys import get_api_key_manager
-    
-    manager = get_api_key_manager()
-    success = await manager.delete(key_id)
-    
-    if not success:
+    result = await db.execute(
+        text("SELECT is_admin FROM api_keys WHERE key_id = :key_id"),
+        {"key_id": key_id}
+    )
+    row = result.fetchone()
+
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail="API key no encontrada",
+        )
+
+    if row[0]:
         raise HTTPException(
             status_code=400,
-            detail="No se puede eliminar la API key maestra o no existe",
+            detail="No se puede eliminar la API key maestra",
         )
-    
+
+    await db.execute(text("DELETE FROM api_keys WHERE key_id = :key_id"), {"key_id": key_id})
+    await db.commit()
+
     return {"success": True, "message": "API key eliminada"}
 
 
@@ -660,19 +714,21 @@ Verifica si una API key es válida y está habilitada.
 )
 async def verify_api_key_endpoint(
     api_key: str,
+    db: AsyncSession = Depends(get_db),
     _verified: None = Depends(verify_admin_key),
 ):
     """Verify an API key."""
-    from app.core.api_keys import get_api_key_manager
-    
-    manager = get_api_key_manager()
-    api_key_obj = await manager.get_by_key(api_key)
-    
-    if not api_key_obj:
+    result = await db.execute(
+        text("SELECT key_id, title, enabled FROM api_keys WHERE api_key = :api_key"),
+        {"api_key": api_key}
+    )
+    row = result.fetchone()
+
+    if not row:
         return APIKeyVerifyResponse(valid=False)
-    
+
     return APIKeyVerifyResponse(
-        valid=api_key_obj.enabled,
-        key_id=api_key_obj.key_id,
-        title=api_key_obj.title,
+        valid=row[2],
+        key_id=row[0],
+        title=row[1],
     )

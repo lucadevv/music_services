@@ -16,6 +16,13 @@ Endpoints under `/search/*`, `/browse/*`, `/explore/*`, `/playlists/*`, `/watch/
 
 - `Authorization: Bearer <api_key>`
 
+Example:
+
+```bash
+curl -H "Authorization: Bearer sk_live_tu_api_key" \
+  "http://localhost:8000/api/v1/search/?q=eminem"
+```
+
 ### Admin Authentication
 
 Endpoints under `/auth/*`, `/api-keys/*`, and `/stats/*` require an `X-Admin-Key` header configured via `ADMIN_SECRET_KEY` in `.env`.
