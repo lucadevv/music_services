@@ -242,6 +242,7 @@ El servicio incluye endpoints de administración para configurar la autenticaci�
 La especificación OpenAPI está disponible en:
 - JSON: `/openapi.json`
 - YAML: `/openapi.yaml`
+- Referencia rápida endpoints + schemas: `docs/SWAGGER_REFERENCE.md`
 
 ## Levantar el servicio
 
