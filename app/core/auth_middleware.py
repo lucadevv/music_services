@@ -1,9 +1,11 @@
 """Global authentication middleware for API routes."""
-from fastapi import Request, HTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 from typing import Optional
 import logging
 
-from app.core.auth import verify_api_key_from_header
+from app.core.api_keys import APIKeyManager
 
 logger = logging.getLogger(__name__)
 
@@ -17,12 +19,12 @@ PUBLIC_PATHS = {
 }
 
 # Paths that require admin privileges
-ADMIN_PATHS = {
+ADMIN_PATHS = [
     "/api/v1/api-keys",
-}
+]
 
 
-class AuthMiddleware:
+class AuthMiddleware(BaseHTTPMiddleware):
     """Authentication middleware that validates API keys for all protected routes."""
     
     async def dispatch(self, request: Request, call_next):
@@ -35,9 +37,9 @@ class AuthMiddleware:
         auth_header = request.headers.get("authorization")
         
         if not auth_header:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=401,
-                detail={
+                content={
                     "error": "Missing Authorization header",
                     "message": "Include 'Authorization: Bearer <api_key>' header"
                 }
@@ -45,9 +47,9 @@ class AuthMiddleware:
         
         # Verify format: "Bearer <token>"
         if not auth_header.startswith("Bearer "):
-            raise HTTPException(
+            return JSONResponse(
                 status_code=401,
-                detail={
+                content={
                     "error": "Invalid Authorization header format",
                     "message": "Use 'Authorization: Bearer <api_key>' format"
                 }
@@ -56,31 +58,69 @@ class AuthMiddleware:
         token = auth_header.replace("Bearer ", "")
         
         if not token:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=401,
-                detail={
-                "error": "Empty Authorization token",
-                "message": "Provide a valid API key"
+                content={
+                    "error": "Empty Authorization token",
+                    "message": "Provide a valid API key"
                 }
             )
         
         # Verify API key
-        from app.core.database import get_db
-        async with get_db() as db:
-            key_info = await verify_api_key_from_header(
-                credentials=f"Bearer {token}",
-                db=db,
+        from app.core.database import AsyncSessionLocal
+        from sqlalchemy import text
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                text("""
+                    SELECT key_id, title, enabled, is_admin
+                    FROM api_keys
+                    WHERE api_key = :api_key
+                """),
+                {"api_key": token}
             )
+            row = result.fetchone()
+            
+            if not row:
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": "Invalid API key",
+                        "message": "The provided API key is not valid"
+                    }
+                )
+            
+            key_id, title, enabled, is_admin = row
+            
+            if not enabled:
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": "API key disabled",
+                        "message": "This API key has been disabled"
+                    }
+                )
+            
+            key_info = {
+                "key_id": key_id,
+                "title": title,
+                "is_admin": is_admin,
+            }
+            
+            await session.execute(
+                text("UPDATE api_keys SET last_used = CURRENT_TIMESTAMP WHERE key_id = :key_id"),
+                {"key_id": key_id}
+            )
+            await session.commit()
         
         # Store key info in request state
         request.state.api_key_info = key_info
         
         # Check admin privileges if required
-        if request.url.path.startswith(tuple(ADMIN_PATHS.keys())):
+        if any(request.url.path.startswith(path) for path in ADMIN_PATHS):
             if not key_info.get("is_admin"):
-                raise HTTPException(
+                return JSONResponse(
                     status_code=403,
-                    detail={
+                    content={
                         "error": "Admin access required",
                         "message": "This endpoint requires admin privileges"
                     }

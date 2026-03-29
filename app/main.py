@@ -28,20 +28,10 @@ from app.core.exception_handlers import (
 from app.api.v1.router import api_router
 from app.core.background_cache import cache_manager
 from app.core.ytmusic_client import is_authenticated
-from app.core.auth_middleware import AuthMiddleware
 
 # Setup logging first
 setup_logging()
 logger = get_logger(__name__)
-
-settings = get_settings()
-
-
-app.add_middleware(AuthMiddleware)
-
-settings = get_settings()
-
-app.add_middleware(AuthMiddleware)
 
 settings = get_settings()
 
@@ -199,6 +189,8 @@ app.add_middleware(
     allow_methods=cors_methods,
     allow_headers=cors_headers,
 )
+
+app.add_middleware(AuthMiddleware)
 
 
 @app.middleware("http")

@@ -14,11 +14,11 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     
     # PostgreSQL
-    POSTGRES_host: str = "postgres"
-    postgres_port: int = 5432
-    postgres_user: str = "music_user"
-    postgres_password: str = "music_password"
-    postgres_db: str = "music_db"
+    POSTGRES_HOST: str = "postgres"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_USER: str = "music_user"
+    POSTGRES_PASSWORD: str = "music_password"
+    POSTGRES_DB: str = "music_db"
     
     HOST: str = "0.0.0.0"
     PORT: int = 8000
@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     ENABLE_COMPRESSION: bool = True
     MAX_WORKERS: int = 10
     
+    CORS_ORIGINS: str = "*"
+    CORS_ALLOW_CREDENTIALS: bool = True
+    CORS_ALLOW_METHODS: str = "*"
+    CORS_ALLOW_HEADERS: str = "*"
+    
+    ADMIN_SECRET_KEY: str = ""
+
+    BROWSER_ACCOUNTS_DIR: str = "/app/browser"
+
     class Config:
         env_file = ".env"
         case_sensitive = True

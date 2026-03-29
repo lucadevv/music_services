@@ -27,7 +27,7 @@ AsyncSessionLocal = async_sessionmaker(
 async def init_db():
     """Initialize database and create tables."""
     async with engine.begin() as conn:
-        await conn.run(text("""
+        await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS api_keys (
                 id SERIAL PRIMARY KEY,
                 key_id VARCHAR(50) UNIQUE NOT NULL,
@@ -38,10 +38,13 @@ async def init_db():
                 is_admin BOOLEAN DEFAULT false,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_used TIMESTAMP
-            );
-            
-            CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys(api_key);
-            CREATE INDEX IF NOT EXISTS idx_api_keys_key_id ON api_keys(key_id);
+            )
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys(api_key)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_api_keys_key_id ON api_keys(key_id)
         """))
     print("✅ Database initialized successfully")
 
