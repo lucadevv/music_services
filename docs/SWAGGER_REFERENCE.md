@@ -10,9 +10,9 @@ This document is a quick human-readable reference for the generated Swagger/Open
 
 ## Authentication model
 
-- Music endpoints (`/search`, `/browse`, `/explore`, `/playlists`, `/watch`, `/stream`, `/podcasts`) require:
+- Music endpoints (`/search`, `/browse`, `/explore`, `/playlists`, `/watch`, `/stream/{video_id}`, `/stream/proxy/{video_id}`, `/stream/batch`, `/podcasts`) require:
   - `Authorization: Bearer <api_key>`
-- Admin endpoints (`/auth/*`, `/api-keys/*`, `/stats/*`) require:
+- Admin endpoints (`/auth/*`, `/api-keys/*`, `/stats/*`, `/stream/cache*`, `/stream/status/*`) require:
   - `X-Admin-Key: <ADMIN_SECRET_KEY>`
 
 ## Endpoint inventory
@@ -74,13 +74,7 @@ This document is a quick human-readable reference for the generated Swagger/Open
 ### Stream
 - `GET /api/v1/stream/{video_id}`
 - `POST /api/v1/stream/batch`
-- `GET /api/v1/stream/status/{video_id}`
 - `GET /api/v1/stream/proxy/{video_id}`
-- `GET /api/v1/stream/cache/stats`
-- `DELETE /api/v1/stream/cache`
-- `GET /api/v1/stream/cache`
-- `GET /api/v1/stream/cache/info/{video_id}`
-- `DELETE /api/v1/stream/cache/{video_id}`
 
 ### Podcasts
 - `GET /api/v1/podcasts/{browse_id}`
@@ -91,6 +85,13 @@ This document is a quick human-readable reference for the generated Swagger/Open
 
 ### Stats (Admin)
 - `GET /api/v1/stats/stats`
+
+### Stream Cache (Admin)
+- `GET /api/v1/stream/cache/stats`
+- `DELETE /api/v1/stream/cache`
+- `GET /api/v1/stream/cache/info/{video_id}`
+- `DELETE /api/v1/stream/cache/{video_id}`
+- `GET /api/v1/stream/status/{video_id}`
 
 ## Schema inventory (`components.schemas`)
 

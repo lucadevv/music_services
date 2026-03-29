@@ -25,6 +25,8 @@ from app.schemas.stream_management import (
     CacheDeleteResponse,
     StreamCacheStatusResponse,
 )
+from app.api.v1.endpoints.auth import verify_admin_key
+from app.core.auth_docs import require_music_bearer_header
 
 router = APIRouter(tags=["stream"])
 logger = logging.getLogger(__name__)
@@ -58,6 +60,7 @@ def get_stream_service() -> StreamService:
 )
 async def proxy_stream_audio(
     video_id: str = Path(..., description="ID del video de YouTube"),
+    _auth: None = Depends(require_music_bearer_header),
     service: StreamService = Depends(get_stream_service)
 ):
     """
@@ -162,6 +165,7 @@ async def proxy_stream_audio(
 async def get_batch_stream_urls(
     video_ids: str = Query(..., alias="ids", description="Lista de IDs separada por comas (máximo 50)"),
     bypass_cache: bool = Query(False, description="Si true, ignora cache y obtiene URLs frescas de YouTube"),
+    _auth: None = Depends(require_music_bearer_header),
     service: StreamService = Depends(get_stream_service)
 ) -> Dict[str, Any]:
     """Returns a dict with results and summary - using Dict[str, Any] for flexibility."""
@@ -227,7 +231,9 @@ async def get_batch_stream_urls(
     summary="Get cache statistics",
     description="Muestra estadísticas del cache de Redis.",
 )
-async def get_stream_cache_stats() -> CacheStatsResponse:
+async def get_stream_cache_stats(
+    _verified: None = Depends(verify_admin_key),
+) -> CacheStatsResponse:
     """Muestra estadísticas del cache."""
     stats = await get_cache_stats()
     return CacheStatsResponse(**stats)
@@ -239,7 +245,9 @@ async def get_stream_cache_stats() -> CacheStatsResponse:
     summary="Clear all stream cache",
     description="Limpia todo el cache de streams.",
 )
-async def clear_all_stream_cache() -> CacheClearResponse:
+async def clear_all_stream_cache(
+    _verified: None = Depends(verify_admin_key),
+) -> CacheClearResponse:
     """Limpia todo el cache de streams."""
     await clear_cache("music:stream")
     return CacheClearResponse(status="cleared", pattern="music:stream")
@@ -253,6 +261,7 @@ async def clear_all_stream_cache() -> CacheClearResponse:
 )
 async def get_stream_cache_info(
     video_id: str = Path(..., description="ID del video"),
+    _verified: None = Depends(verify_admin_key),
 ) -> CacheInfoResponse:
     """Muestra información del cache para un video."""
     validate_video_id(video_id)
@@ -290,6 +299,7 @@ async def get_stream_cache_info(
 )
 async def delete_stream_cache(
     video_id: str = Path(..., description="ID del video"),
+    _verified: None = Depends(verify_admin_key),
 ) -> CacheDeleteResponse:
     """Elimina el cache de un video específico."""
     validate_video_id(video_id)
@@ -323,6 +333,7 @@ async def delete_stream_cache(
 )
 async def get_stream_cache_status(
     video_id: str = Path(..., description="ID del video"),
+    _verified: None = Depends(verify_admin_key),
     service: StreamService = Depends(get_stream_service)
 ) -> StreamCacheStatusResponse:
     """
@@ -360,6 +371,7 @@ async def get_stream_cache_status(
 async def get_stream_url(
     video_id: str = Path(..., description="ID del video/canción"),
     bypass_cache: bool = Query(False, description="Si true, ignora la caché y genera una URL fresca"),
+    _auth: None = Depends(require_music_bearer_header),
     service: StreamService = Depends(get_stream_service)
 ) -> StreamUrlResponse:
     """

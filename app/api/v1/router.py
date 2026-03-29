@@ -29,5 +29,5 @@ api_router.include_router(search.router, prefix="/search", tags=["search"], depe
 api_router.include_router(playlists.router, prefix="/playlists", tags=["playlists"], dependencies=[Depends(require_music_bearer_header)])
 api_router.include_router(watch.router, prefix="/watch", tags=["watch"], dependencies=[Depends(require_music_bearer_header)])
 api_router.include_router(podcasts.router, prefix="/podcasts", tags=["podcasts"], dependencies=[Depends(require_music_bearer_header)])
-api_router.include_router(stream.router, prefix="/stream", tags=["stream"], dependencies=[Depends(require_music_bearer_header)])
+api_router.include_router(stream.router, prefix="/stream", tags=["stream"])
 api_router.include_router(stats.router, prefix="/stats", tags=["stats"])

@@ -23,6 +23,8 @@ ADMIN_BYPASS_PATHS = (
     "/api/v1/auth",
     "/api/v1/api-keys",
     "/api/v1/stats",
+    "/api/v1/stream/cache",
+    "/api/v1/stream/status",
 )
 
 # Paths that require admin privileges

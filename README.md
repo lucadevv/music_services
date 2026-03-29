@@ -120,9 +120,9 @@ Esto elimina los 403 que ocurrían cuando YouTube expira las URLs (~6h) y el end
 
 El servicio separa autenticación de **música** y **admin**:
 
-- Endpoints de música (`/search`, `/browse`, `/explore`, `/playlists`, `/watch`, `/stream`, `/podcasts`) requieren:
+- Endpoints de música (`/search`, `/browse`, `/explore`, `/playlists`, `/watch`, `/stream/{video_id}`, `/stream/proxy/{video_id}`, `/stream/batch`, `/podcasts`) requieren:
   - `Authorization: Bearer <api_key>`
-- Endpoints de admin (`/auth/*`, `/api-keys/*`, `/stats/*`) requieren:
+- Endpoints de admin (`/auth/*`, `/api-keys/*`, `/stats/*`, `/stream/cache*`, `/stream/status/*`) requieren:
   - `X-Admin-Key: <ADMIN_SECRET_KEY>`
 
 Ejemplo para endpoints de música:
