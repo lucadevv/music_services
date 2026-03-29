@@ -25,6 +25,7 @@ FROM python:3.11-slim AS production
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ffmpeg \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
@@ -40,6 +41,9 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY --chown=appuser:appuser . .
 
+# Create oauth directory (mounted as volume at runtime)
+RUN mkdir -p /app/oauth && chown appuser:appuser /app/oauth
+
 # Switch to non-root user
 USER appuser
 
@@ -49,6 +53,8 @@ EXPOSE 8000
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
+
+ENTRYPOINT ["bash", "/app/scripts/docker-entrypoint.sh"]
 
 # Run the application with uvicorn workers
 CMD ["python", "servicio_ytmusic.py"]

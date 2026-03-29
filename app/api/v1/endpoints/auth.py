@@ -1,24 +1,24 @@
-"""OAuth authentication endpoints for admin panel."""
+"""Browser authentication endpoints for admin panel."""
 import json
-import time
-import uuid
 import logging
-from pathlib import Path
-from typing import Dict, Optional
+import time
+from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
-from ytmusicapi.auth.oauth.credentials import OAuthCredentials
+from fastapi import APIRouter, Depends, HTTPException, Header
+import httpx
 
 from app.core.config import get_settings
-from app.core.cache_redis import get_redis_client
-from app.core.ytmusic_client import get_ytmusic_client, reset_ytmusic_client
+from app.core.browser_client import (
+    get_browser_manager,
+    get_auth_status,
+    reset_client_cache,
+    get_ytmusic,
+)
 from app.schemas.auth import (
-    CredentialsRequest,
-    CredentialsResponse,
-    OAuthStartResponse,
-    OAuthPollRequest,
-    OAuthPollPendingResponse,
-    OAuthPollAuthorizedResponse,
+    BrowserAddResponse,
+    BrowserListResponse,
+    BrowserAccountInfo,
+    BrowserTestResponse,
     AuthStatusResponse,
 )
 
@@ -27,75 +27,12 @@ settings = get_settings()
 
 router = APIRouter()
 
-REDIS_CREDENTIALS_KEY = "music:auth:oauth:credentials"
-REDIS_SESSION_PREFIX = "music:auth:oauth:session:"
-
-EXPECTED_TOKEN_FIELDS = {
-    "access_token",
-    "refresh_token",
-    "expires_in",
-    "scope",
-    "token_type",
-}
-
 FORBIDDEN_RESPONSE = {
     403: {
         "description": "Admin key inválida o no configurada",
         "content": {
             "application/json": {
                 "example": {"detail": "Admin key inválida."}
-            }
-        },
-    }
-}
-
-NO_CREDENTIALS_RESPONSE = {
-    400: {
-        "description": "No hay credenciales OAuth configuradas",
-        "content": {
-            "application/json": {
-                "example": {
-                    "detail": "No hay credenciales OAuth configuradas. Guarda client_id y client_secret primero."
-                }
-            }
-        },
-    }
-}
-
-SESSION_NOT_FOUND_RESPONSE = {
-    404: {
-        "description": "Sesión no encontrada o expirada",
-        "content": {
-            "application/json": {
-                "example": {
-                    "detail": "Sesión no encontrada o expirada. Inicia un nuevo flujo OAuth."
-                }
-            }
-        },
-    }
-}
-
-SESSION_EXPIRED_RESPONSE = {
-    410: {
-        "description": "Sesión expirada o denegada por el usuario",
-        "content": {
-            "application/json": {
-                "example": {
-                    "detail": "Sesión expirada o denegada. Inicia un nuevo flujo OAuth."
-                }
-            }
-        },
-    }
-}
-
-GOOGLE_ERROR_RESPONSE = {
-    502: {
-        "description": "Error comunicándose con Google OAuth",
-        "content": {
-            "application/json": {
-                "example": {
-                    "detail": "Error comunicándose con Google OAuth: ..."
-                }
             }
         },
     }
@@ -110,10 +47,7 @@ async def verify_admin_key(
         examples=["mi-clave-super-secreta"],
     ),
 ) -> None:
-    """Verify the admin key from request header.
-
-    ADMIN_SECRET_KEY is mandatory. If not configured, all auth endpoints return 403.
-    """
+    """Verify the admin key from request header."""
     configured_key = settings.ADMIN_SECRET_KEY
     if not configured_key:
         raise HTTPException(
@@ -127,323 +61,327 @@ async def verify_admin_key(
         )
 
 
-async def get_oauth_credentials() -> Dict[str, str]:
-    """Get OAuth credentials from Redis, fallback to .env."""
-    try:
-        client = await get_redis_client()
-        stored = await client.get(REDIS_CREDENTIALS_KEY)
-        if stored:
-            creds = json.loads(stored)
-            if creds.get("client_id") and creds.get("client_secret"):
-                return creds
-    except Exception as e:
-        logger.warning(f"Error reading credentials from Redis: {e}")
-
-    if settings.YTMUSIC_CLIENT_ID and settings.YTMUSIC_CLIENT_SECRET:
-        return {
-            "client_id": settings.YTMUSIC_CLIENT_ID,
-            "client_secret": settings.YTMUSIC_CLIENT_SECRET,
-        }
-
-    return {}
-
-
 @router.post(
-    "/credentials",
-    response_model=CredentialsResponse,
-    summary="Guardar credenciales OAuth",
+    "/browser/from-url",
+    response_model=BrowserAddResponse,
+    summary="Agregar cuenta desde URL",
     description="""
-Guarda el Client ID y Client Secret de Google Cloud en Redis.
+Agrega una cuenta de navegador descargando los headers desde una URL.
 
-Estas credenciales se usan para iniciar el flujo OAuth y para refrescar tokens.
-Se guardan en Redis (no en .env), por lo que se pueden actualizar desde el panel
-admin sin reiniciar el servicio.
+La URL debe devolver los headers de autenticación de YouTube Music en formato JSON.
 
-**Requisitos previos:**
-- Haber creado un OAuth Client ID en Google Cloud Console
-- Application type: "TVs and Limited Input Devices"
-- YouTube Data API v3 habilitada
+**Cómo obtener los headers:**
+1. Abrí YouTube Music en Chrome/Firefox
+2. Abrí DevTools (F12) > Network
+3. Hacé cualquier request a music.youtube.com
+4. Copiá los headers del request ( Authorization, X-YouTube-Music-DevKey, etc.)
+5. Subí un archivo JSON con esos headers a cualquier hosting
+6. Pasá la URL aquí
+
+**También podés usar el endpoint `/browser/from-headers` para pasar los headers directamente.**
 """,
     responses={
         **FORBIDDEN_RESPONSE,
         200: {
-            "description": "Credenciales guardadas exitosamente",
+            "description": "Cuenta agregada exitosamente",
             "content": {
                 "application/json": {
                     "example": {
-                        "has_credentials": True,
-                        "updated_at": "2026-03-27T16:00:00Z",
+                        "success": True,
+                        "account_name": "account_1",
+                        "message": "Cuenta agregada exitosamente"
                     }
+                }
+            },
+        },
+        400: {
+            "description": "URL inválida o no accessible",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "No se pudo descargar headers de la URL"}
                 }
             },
         },
     },
 )
-async def save_credentials(
-    body: CredentialsRequest,
+async def add_browser_account_from_url(
+    url: str,
+    name: Optional[str] = None,
     _verified: None = Depends(verify_admin_key),
 ):
-    client = await get_redis_client()
-    data = {
-        "client_id": body.client_id,
-        "client_secret": body.client_secret,
-        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    }
-    await client.set(REDIS_CREDENTIALS_KEY, json.dumps(data))
-    logger.info("OAuth credentials saved to Redis")
-    reset_ytmusic_client()
-    return CredentialsResponse(
-        has_credentials=True,
-        updated_at=data["updated_at"],
-    )
+    """Download and add browser account from a URL."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            headers = response.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo descargar headers de la URL: {str(e)}",
+        )
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="La URL no devuelve JSON válido",
+        )
+    
+    if not isinstance(headers, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="El JSON debe ser un objeto con los headers",
+        )
+    
+    account_name = name or f"account_{int(time.time())}"
+    
+    try:
+        saved_name = get_browser_manager().add_account(account_name, headers)
+        reset_client_cache()
+        
+        return BrowserAddResponse(
+            success=True,
+            account_name=saved_name,
+            message="Cuenta agregada exitosamente",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Error al guardar cuenta: {str(e)}",
+        )
+
+
+@router.post(
+    "/browser/from-headers",
+    response_model=BrowserAddResponse,
+    summary="Agregar cuenta desde headers",
+    description="""
+Agrega una cuenta de navegador pasando los headers directamente.
+
+**Cómo obtener los headers:**
+1. Abrí YouTube Music en Chrome/Firefox
+2. Abrí DevTools (F12) > Network
+3. Hacé cualquier request a music.youtube.com
+4. Copiá todos los headers del request
+5. Pegalos aquí en formato JSON
+
+Los headers típicos incluyen:
+- Authorization
+- X-YouTube-Music-DevKey
+- X-YouTube-Client-Name
+- X-YouTube-Client-Version
+- Cookie (si está disponible)
+""",
+    responses={
+        **FORBIDDEN_RESPONSE,
+        200: {
+            "description": "Cuenta agregada exitosamente",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": True,
+                        "account_name": "cuenta_1",
+                        "message": "Cuenta agregada exitosamente"
+                    }
+                }
+            },
+        },
+        400: {
+            "description": "Headers inválidos",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Headers inválidos o incompletos"}
+                }
+            },
+        },
+    },
+)
+async def add_browser_account_from_headers(
+    headers: dict,
+    name: Optional[str] = None,
+    _verified: None = Depends(verify_admin_key),
+):
+    """Add browser account from raw headers."""
+    if not headers or not isinstance(headers, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="Headers inválidos o incompletos",
+        )
+    
+    account_name = name or f"cuenta_{int(time.time())}"
+    
+    try:
+        saved_name = get_browser_manager().add_account(account_name, headers)
+        reset_client_cache()
+        
+        return BrowserAddResponse(
+            success=True,
+            account_name=saved_name,
+            message="Cuenta agregada exitosamente",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Error al guardar cuenta: {str(e)}",
+        )
 
 
 @router.get(
-    "/credentials",
-    response_model=CredentialsResponse,
-    summary="Consultar estado de credenciales",
+    "/browser",
+    response_model=BrowserListResponse,
+    summary="Listar cuentas",
     description="""
-Verifica si hay credenciales OAuth almacenadas en Redis (o en .env como fallback).
-No expone los valores de client_id ni client_secret por seguridad.
+Lista todas las cuentas de navegador disponibles y su estado.
 """,
     responses={
         **FORBIDDEN_RESPONSE,
         200: {
-            "description": "Estado de credenciales",
+            "description": "Lista de cuentas",
             "content": {
                 "application/json": {
                     "example": {
-                        "has_credentials": True,
-                        "updated_at": "2026-03-27T16:00:00Z",
+                        "total": 2,
+                        "available": 1,
+                        "accounts": [
+                            {
+                                "name": "cuenta_1",
+                                "available": True,
+                                "error_count": 0,
+                                "rate_limited_until": None,
+                                "last_used": 1234567890.0
+                            },
+                            {
+                                "name": "cuenta_2",
+                                "available": False,
+                                "error_count": 5,
+                                "rate_limited_until": 1234567890.0,
+                                "last_used": 1234567880.0
+                            }
+                        ]
                     }
                 }
             },
         },
     },
 )
-async def get_credentials(
+async def list_browser_accounts(
     _verified: None = Depends(verify_admin_key),
 ):
-    creds = await get_oauth_credentials()
-    return CredentialsResponse(
-        has_credentials=bool(creds),
-        updated_at=creds.get("updated_at"),
+    """List all browser accounts."""
+    manager = get_browser_manager()
+    accounts = manager.list_accounts()
+    available = manager.get_available_accounts()
+    
+    return BrowserListResponse(
+        total=len(accounts),
+        available=len(available),
+        accounts=[BrowserAccountInfo(**acc) for acc in accounts],
     )
 
 
-@router.post(
-    "/oauth/start",
-    response_model=OAuthStartResponse,
-    summary="Iniciar flujo OAuth",
+@router.delete(
+    "/browser/{account_name}",
+    summary="Eliminar cuenta",
     description="""
-Inicia el flujo de autorización OAuth Device Flow de Google.
-
-**Flujo:**
-1. Se solicita un código de dispositivo a Google
-2. Google devuelve una URL de verificación y un código de usuario
-3. El usuario debe abrir la URL e ingresar el código
-4. Se crea una sesión en Redis para hacer polling
-
-**Importante:** La sesión expira en ~15 minutos. Si el usuario no autoriza a tiempo,
-debes iniciar un nuevo flujo.
-
-**Después de este endpoint:**
-- Muestra al usuario la `verification_url` y el `user_code`
-- Llama a `POST /auth/oauth/poll` con el `session_id` cada 5 segundos
+Elimina una cuenta de navegador por nombre.
 """,
     responses={
         **FORBIDDEN_RESPONSE,
-        **NO_CREDENTIALS_RESPONSE,
-        **GOOGLE_ERROR_RESPONSE,
         200: {
-            "description": "Flujo OAuth iniciado",
+            "description": "Cuenta eliminada",
             "content": {
                 "application/json": {
                     "example": {
-                        "session_id": "550e8400-e29b-41d4-a716-446655440000",
-                        "verification_url": "https://www.google.com/device",
-                        "user_code": "ABCD-EFGH",
-                        "expires_in": 900,
-                        "interval": 5,
+                        "success": True,
+                        "message": "Cuenta eliminada"
                     }
+                }
+            },
+        },
+        404: {
+            "description": "Cuenta no encontrada",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Cuenta no encontrada"}
                 }
             },
         },
     },
 )
-async def start_oauth_flow(
+async def delete_browser_account(
+    account_name: str,
     _verified: None = Depends(verify_admin_key),
 ):
-    creds = await get_oauth_credentials()
-    if not creds:
+    """Delete a browser account."""
+    success = get_browser_manager().remove_account(account_name)
+    
+    if not success:
         raise HTTPException(
-            status_code=400,
-            detail="No hay credenciales OAuth configuradas. Guarda client_id y client_secret primero.",
+            status_code=404,
+            detail="Cuenta no encontrada",
         )
-
-    try:
-        oauth_creds = OAuthCredentials(
-            client_id=creds["client_id"],
-            client_secret=creds["client_secret"],
-        )
-        code_response = oauth_creds.get_code()
-
-        session_id = str(uuid.uuid4())
-        session_data = {
-            "device_code": code_response["device_code"],
-            "user_code": code_response["user_code"],
-            "verification_url": code_response["verification_url"],
-            "expires_in": code_response["expires_in"],
-            "interval": code_response.get("interval", 5),
-            "created_at": time.time(),
-        }
-
-        client = await get_redis_client()
-        await client.set(
-            f"{REDIS_SESSION_PREFIX}{session_id}",
-            json.dumps(session_data),
-            ex=session_data["expires_in"],
-        )
-
-        logger.info(f"OAuth session started: {session_id}")
-
-        return OAuthStartResponse(
-            session_id=session_id,
-            verification_url=session_data["verification_url"],
-            user_code=session_data["user_code"],
-            expires_in=session_data["expires_in"],
-            interval=session_data["interval"],
-        )
-    except Exception as e:
-        logger.error(f"Error starting OAuth flow: {e}")
-        raise HTTPException(
-            status_code=502,
-            detail=f"Error comunicándose con Google OAuth: {str(e)}",
-        )
+    
+    reset_client_cache()
+    
+    return {"success": True, "message": "Cuenta eliminada"}
 
 
 @router.post(
-    "/oauth/poll",
-    summary="Verificar autorización OAuth",
+    "/browser/test",
+    response_model=BrowserTestResponse,
+    summary="Probar autenticación",
     description="""
-Verifica si el usuario completó la autorización en Google.
-
-**Polling:** Llamar cada 5 segundos (usar el `interval` de `/oauth/start`) hasta recibir
-`status: "authorized"`.
-
-**Respuestas posibles:**
-- `200` con `status: "pending"` → El usuario aún no autorizó. Seguir haciendo polling.
-- `200` con `status: "authorized"` → Autorización completada. Token guardado en `oauth.json`.
-- `410` → Sesión expirada o denegada. Iniciar nuevo flujo con `/oauth/start`.
-- `502` → Error de comunicación con Google.
-
-**Cuando la autorización es exitosa:**
-1. Se filtran campos extra de la respuesta de Google (workaround bug ytmusicapi)
-2. Se escribe `oauth.json` con los campos correctos
-3. Se invalida el cache del cliente YTMusic
-4. Se elimina la sesión de Redis
+Prueba la autenticación con YouTube Music.
 """,
     responses={
         **FORBIDDEN_RESPONSE,
-        **SESSION_NOT_FOUND_RESPONSE,
-        **SESSION_EXPIRED_RESPONSE,
-        **NO_CREDENTIALS_RESPONSE,
-        **GOOGLE_ERROR_RESPONSE,
         200: {
-            "description": "Resultado del polling",
+            "description": "Resultado del test",
             "content": {
                 "application/json": {
-                    "examples": {
-                        "pending": {
-                            "summary": "Esperando autorización",
-                            "value": {
-                                "status": "pending",
-                                "message": "Waiting for user authorization",
-                            },
-                        },
-                        "authorized": {
-                            "summary": "Autorización completada",
-                            "value": {
-                                "status": "authorized",
-                                "message": "OAuth token saved successfully",
-                            },
-                        },
+                    "example": {
+                        "success": True,
+                        "message": "Autenticación exitosa",
+                        "account_used": "cuenta_1"
+                    }
+                }
+            },
+        },
+        503: {
+            "description": "Sin cuentas disponibles",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "success": False,
+                        "message": "No hay cuentas disponibles"
                     }
                 }
             },
         },
     },
 )
-async def poll_oauth_authorization(
-    body: OAuthPollRequest,
+async def test_authentication(
     _verified: None = Depends(verify_admin_key),
 ):
-    client = await get_redis_client()
-    session_key = f"{REDIS_SESSION_PREFIX}{body.session_id}"
-
-    session_data = await client.get(session_key)
-    if not session_data:
-        raise HTTPException(
-            status_code=404,
-            detail="Sesión no encontrada o expirada. Inicia un nuevo flujo OAuth.",
-        )
-
-    session = json.loads(session_data)
-
-    creds = await get_oauth_credentials()
-    if not creds:
-        raise HTTPException(
-            status_code=400,
-            detail="No hay credenciales OAuth configuradas.",
-        )
-
+    """Test authentication with YouTube Music."""
     try:
-        oauth_creds = OAuthCredentials(
-            client_id=creds["client_id"],
-            client_secret=creds["client_secret"],
+        client = get_ytmusic()
+        result = client.get_search_suggestions("test", ignore_spelling=True)
+        
+        manager = get_browser_manager()
+        available = manager.get_available_accounts()
+        account_used = available[0].name if available else "unknown"
+        
+        return BrowserTestResponse(
+            success=True,
+            message="Autenticación exitosa",
+            account_used=account_used,
         )
-        raw_token = oauth_creds.token_from_code(session["device_code"])
     except Exception as e:
-        error_msg = str(e)
-        if "authorization_pending" in error_msg or "slow_down" in error_msg:
-            return OAuthPollPendingResponse()
-        if "expired_token" in error_msg or "access_denied" in error_msg:
-            await client.delete(session_key)
-            raise HTTPException(
-                status_code=410,
-                detail="Sesión expirada o denegada. Inicia un nuevo flujo OAuth.",
-            )
-        logger.error(f"Error polling OAuth: {e}")
-        raise HTTPException(
-            status_code=502,
-            detail=f"Error comunicándose con Google OAuth: {str(e)}",
+        return BrowserTestResponse(
+            success=False,
+            message=f"Error: {str(e)}",
+            account_used=None,
         )
-
-    safe_token = {
-        k: v
-        for k, v in raw_token.items()
-        if k in EXPECTED_TOKEN_FIELDS or k == "expires_at"
-    }
-    safe_token["expires_at"] = int(time.time()) + raw_token.get("expires_in", 3600)
-
-    oauth_path = Path(settings.OAUTH_JSON_PATH)
-    try:
-        with open(oauth_path, "w", encoding="utf-8") as f:
-            json.dump(safe_token, f, indent=2)
-        logger.info(f"OAuth token saved to {oauth_path}")
-    except Exception as e:
-        logger.error(f"Error writing oauth.json: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error guardando token OAuth: {str(e)}",
-        )
-
-    await client.delete(session_key)
-    reset_ytmusic_client()
-
-    logger.info("OAuth authorization completed successfully")
-
-    return OAuthPollAuthorizedResponse()
 
 
 @router.get(
@@ -451,14 +389,7 @@ async def poll_oauth_authorization(
     response_model=AuthStatusResponse,
     summary="Estado de autenticación",
     description="""
-Verifica el estado completo de la autenticación OAuth del servicio.
-
-**Qué verifica:**
-- `has_credentials`: Si hay credenciales almacenadas (Redis o .env)
-- `has_token`: Si el archivo `oauth.json` existe
-- `authenticated`: Si el cliente YTMusic puede hacer requests a YouTube Music (hace una prueba real)
-
-**Uso típico:** Llamar al cargar el panel admin para mostrar el estado actual.
+Verifica el estado de la autenticación del servicio.
 """,
     responses={
         **FORBIDDEN_RESPONSE,
@@ -466,61 +397,21 @@ Verifica el estado completo de la autenticación OAuth del servicio.
             "description": "Estado de autenticación",
             "content": {
                 "application/json": {
-                    "examples": {
-                        "not_configured": {
-                            "summary": "Sin credenciales",
-                            "value": {
-                                "authenticated": False,
-                                "has_credentials": False,
-                                "has_token": False,
-                                "method": "oauth",
-                            },
-                        },
-                        "credentials_only": {
-                            "summary": "Credenciales sin token",
-                            "value": {
-                                "authenticated": False,
-                                "has_credentials": True,
-                                "has_token": False,
-                                "method": "oauth",
-                            },
-                        },
-                        "fully_authenticated": {
-                            "summary": "Autenticado correctamente",
-                            "value": {
-                                "authenticated": True,
-                                "has_credentials": True,
-                                "has_token": True,
-                                "method": "oauth",
-                            },
-                        },
+                    "example": {
+                        "authenticated": True,
+                        "method": "browser",
+                        "total_accounts": 2,
+                        "available_accounts": 1,
+                        "accounts": []
                     }
                 }
             },
         },
     },
 )
-async def get_auth_status(
+async def get_auth_status_endpoint(
     _verified: None = Depends(verify_admin_key),
 ):
-    creds = await get_oauth_credentials()
-    oauth_path = Path(settings.OAUTH_JSON_PATH)
-
-    has_token = oauth_path.exists()
-
-    authenticated = False
-    if has_token and creds:
-        try:
-            client = get_ytmusic_client()
-            test = client.get_search_suggestions("test", ignore_spelling=True)
-            authenticated = bool(test)
-        except Exception as e:
-            logger.debug(f"Auth test failed: {e}")
-            authenticated = False
-
-    return AuthStatusResponse(
-        authenticated=authenticated,
-        has_credentials=bool(creds),
-        has_token=has_token,
-        method="oauth",
-    )
+    """Get authentication status."""
+    status = get_auth_status()
+    return AuthStatusResponse(**status)

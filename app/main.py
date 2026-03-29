@@ -25,6 +25,7 @@ from app.core.exception_handlers import (
 )
 from app.api.v1.router import api_router
 from app.core.background_cache import cache_manager
+from app.core.ytmusic_client import is_authenticated
 
 # Setup logging first
 setup_logging()
@@ -102,20 +103,21 @@ app = FastAPI(
     - 🎧 **Streaming**: URLs directas de audio (best quality)
     - 📱 **Navegación**: Artistas, álbumes, canciones, letras
     - 🎙️ **Podcasts**: Canales, episodios y playlists
-    - 🔐 **OAuth Admin**: Configuración de autenticación desde panel admin
+    - 🔐 **Browser Admin**: Configuración de autenticación desde panel admin
     - ⚡ **Rendimiento**: Caché inteligente, circuit breaker, rate limiting
     
-    ## Autenticación OAuth (Admin)
+    ## Autenticación Browser (Admin)
     
-    Los endpoints `/api/v1/auth/*` permiten configurar la autenticación OAuth
+    Los endpoints `/api/v1/auth/*` permiten configurar la autenticación con browser headers
     de YouTube Music desde un panel de administración. Todos requieren el header
     `X-Admin-Key` configurado en `.env` como `ADMIN_SECRET_KEY`.
     
     **Flujo:**
-    1. `POST /api/v1/auth/credentials` — Guardar Client ID + Client Secret
-    2. `POST /api/v1/auth/oauth/start` — Iniciar flujo de autorización
-    3. `POST /api/v1/auth/oauth/poll` — Verificar autorización (polling cada 5s)
-    4. `GET /api/v1/auth/status` — Consultar estado de autenticación
+    1. `POST /api/v1/auth/browser/from-url` — Agregar cuenta desde URL (descarga headers)
+    2. `POST /api/v1/auth/browser/from-headers` — Agregar cuenta pasando headers directamente
+    3. `GET /api/v1/auth/browser` — Listar todas las cuentas
+    4. `DELETE /api/v1/auth/browser/{name}` — Eliminar una cuenta
+    5. `GET /api/v1/auth/status` — Consultar estado de autenticación
     
     ## Optimizaciones
     
@@ -230,7 +232,7 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
                         "status": "online",
                         "service": "YouTube Music Service",
                         "version": "1.0.0",
-                        "auth": "OAuth",
+                        "auth": "browser",
                         "docs": "/docs",
                         "api": "/api/v1"
                     }
@@ -247,7 +249,7 @@ async def root():
         "status": "online",
         "service": settings.PROJECT_NAME,
         "version": settings.VERSION,
-        "auth": "OAuth",
+        "auth": "browser",
         "docs": "/docs",
         "api": settings.API_V1_STR
     }
@@ -272,7 +274,10 @@ async def root():
 )
 async def health_check():
     """Health check endpoint para monitoreo."""
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "authenticated": is_authenticated(),
+    }
 
 
 @app.get("/openapi.yaml", include_in_schema=False)

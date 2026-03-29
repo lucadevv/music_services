@@ -24,9 +24,7 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
-      - OAUTH_JSON_PATH=/app/oauth.json
-      - YTMUSIC_CLIENT_ID=${YTMUSIC_CLIENT_ID}
-      - YTMUSIC_CLIENT_SECRET=${YTMUSIC_CLIENT_SECRET}
+      - BROWSER_ACCOUNTS_DIR=/app/browser
       - ADMIN_SECRET_KEY=${ADMIN_SECRET_KEY}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
@@ -44,7 +42,7 @@ services:
       - HTTP_TIMEOUT=${HTTP_TIMEOUT:-30}
       - MAX_WORKERS=${MAX_WORKERS:-4}
     volumes:
-      - oauth_data:/app
+      - browser_data:/app/browser
     depends_on:
       ytmusic_redis:
         condition: service_healthy
@@ -80,9 +78,7 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
-      - OAUTH_JSON_PATH=/app/oauth.json
-      - YTMUSIC_CLIENT_ID=${YTMUSIC_CLIENT_ID}
-      - YTMUSIC_CLIENT_SECRET=${YTMUSIC_CLIENT_SECRET}
+      - BROWSER_ACCOUNTS_DIR=/app/browser
       - ADMIN_SECRET_KEY=${ADMIN_SECRET_KEY}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-false}
@@ -99,6 +95,7 @@ services:
     volumes:
       - ./:/app
       - /app/__pycache__
+      - browser_data:/app/browser
     depends_on:
       ytmusic_redis:
         condition: service_healthy
@@ -145,7 +142,7 @@ networks:
     name: music_app_network
 
 volumes:
-  oauth_data:
-    driver: local
   ytmusic_redis_data:
+    driver: local
+  browser_data:
     driver: local

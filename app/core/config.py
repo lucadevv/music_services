@@ -13,9 +13,10 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "YouTube Music Service"
     VERSION: str = "1.0.0"
     
-    OAUTH_JSON_PATH: str = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "oauth.json")
-    YTMUSIC_CLIENT_ID: Optional[str] = None
-    YTMUSIC_CLIENT_SECRET: Optional[str] = None
+    # Browser authentication
+    BROWSER_ACCOUNTS_DIR: str = "/app/browser"
+    
+    # Admin
     ADMIN_SECRET_KEY: Optional[str] = None
     
     CORS_ORIGINS: str = "*"

@@ -144,44 +144,7 @@ async def get_cached_ttl(key: str) -> int:
     return -1
 
 
-async def get_cached_value_with_stale(key: str, stale_ttl: int = 300) -> Optional[Any]:
-    """
-    Get cached value, allowing stale data within grace period.
-    
-    Args:
-        key: Cache key
-        stale_ttl: Additional seconds to allow stale data (default 5 min)
-    
-    Returns:
-        Cached value if fresh or stale, None if not found
-    """
-    if not settings.CACHE_ENABLED:
-        return None
-    
-    try:
-        client = await get_redis_client()
-        value = await client.get(key)
-        if value:
-            return json.loads(value)
-        
-        timestamp_key = f"{key}:timestamp"
-        timestamp = await client.get(timestamp_key)
-        
-        if timestamp:
-            try:
-                ts = float(timestamp)
-                default_ttl = 18000  # 5 hours for streams
-                if (time.time() - ts) < (default_ttl + stale_ttl):
-                    value = await client.get(key)
-                    if value:
-                        logger.debug(f"Serving stale cache for {key}")
-                        return json.loads(value)
-            except (ValueError, TypeError):
-                pass
-                
-    except Exception as e:
-        logger.warning(f"Error getting cached value with stale for {key}: {e}")
-    return None
+
 
 
 async def has_cached_key(key: str) -> bool:
@@ -448,15 +411,3 @@ def cache_result(ttl: Optional[int] = None):
         return wrapper
     return decorator
 
-
-# Alias for backward compatibility
-cache_module = {
-    'get_cached_value': get_cached_value,
-    'set_cached_value': set_cached_value,
-    'get_cached_timestamp': get_cached_timestamp,
-    'has_cached_key': has_cached_key,
-    'clear_cache': clear_cache,
-    'get_cache_stats': get_cache_stats,
-    'track_active_stream': track_active_stream,
-    'get_active_streams': get_active_streams,
-}

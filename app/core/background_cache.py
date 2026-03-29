@@ -22,7 +22,7 @@ from app.core.cache_redis import (
     get_active_streams,
     set_cached_value,
 )
-from app.core.ytmusic_client import get_ytmusic
+from app.core.browser_client import get_ytmusic
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,12 @@ class CacheManager:
         """Pre-cache popular endpoints on startup."""
         logger.info("Warming endpoint cache...")
         
-        ytmusic = get_ytmusic()
+        try:
+            ytmusic = get_ytmusic()
+        except Exception:
+            logger.warning("YTMusic not available. Skipping cache warming.")
+            return
+        
         if ytmusic is None:
             logger.warning("YTMusic not available. Skipping cache warming.")
             return
