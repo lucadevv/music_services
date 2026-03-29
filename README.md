@@ -118,7 +118,12 @@ Esto elimina los 403 que ocurrían cuando YouTube expira las URLs (~6h) y el end
 
 ### Autenticación
 
-El servicio usa **API Keys** para autenticación de administrador.
+El servicio separa autenticación de **música** y **admin**:
+
+- Endpoints de música (`/search`, `/browse`, `/explore`, `/playlists`, `/watch`, `/stream`, `/podcasts`) requieren:
+  - `Authorization: Bearer <api_key>`
+- Endpoints de admin (`/auth/*`, `/api-keys/*`, `/stats/*`) requieren:
+  - `X-Admin-Key: <ADMIN_SECRET_KEY>`
 
 ### Endpoints de Autenticación (`/api/v1/auth/*`)
 
@@ -144,18 +149,14 @@ El servicio usa **API Keys** para autenticación de administrador.
 
 **Al iniciar el servicio por primera vez:**
 
-1. Se crea automáticamente una **API key maestra** si no existe ninguna
-2. Revisa los logs del contenedor para obtener la API key maestra:
-   ```bash
-   docker-compose logs api | grep "Master API key"
-   ```
-3. Usá esa API key en el header `X-Admin-Key` para todos los endpoints de admin
+1. Configurá `ADMIN_SECRET_KEY` en tu `.env`
+2. Usá ese valor en el header `X-Admin-Key` para todos los endpoints de admin
 
 **Crear nuevas API keys:**
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/api-keys \
-  -H "X-Admin-Key: your-master-api-key" \
+  -H "X-Admin-Key: your-admin-secret-key" \
   -H "Content-Type: application/json" \
   -d '{"title": "Mobile App"}'
 ```
@@ -175,12 +176,12 @@ curl -X POST http://localhost:8000/api/v1/auth/api-keys \
 **Usar API key:**
 ```bash
 curl http://localhost:8000/api/v1/auth/browser \
-  -H "X-Admin-Key: sk_live_1a2b3c4d5e6f7g8h9i0j"
+  -H "X-Admin-Key: your-admin-secret-key"
 ```
 
 ### Retrocompatibilidad
 
-Si tenés `ADMIN_SECRET_KEY` configurado en `.env`, seguirá funcionando. Pero te recomendamos migrar a API keys para mejor control y auditoría.
+`ADMIN_SECRET_KEY` es obligatorio para endpoints de admin. Las API keys de base de datos se usan para consumo de endpoints de música.
 
 ### Stats
 

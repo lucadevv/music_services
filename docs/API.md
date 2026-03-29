@@ -10,9 +10,15 @@ http://localhost:8000/api/v1
 
 ## Authentication
 
+### Music Endpoints Authentication
+
+Endpoints under `/search/*`, `/browse/*`, `/explore/*`, `/playlists/*`, `/watch/*`, `/stream/*`, and `/podcasts/*` require:
+
+- `Authorization: Bearer <api_key>`
+
 ### Admin Authentication
 
-Endpoints under `/auth/*` require an `X-Admin-Key` header configured via `ADMIN_SECRET_KEY` in `.env`.
+Endpoints under `/auth/*`, `/api-keys/*`, and `/stats/*` require an `X-Admin-Key` header configured via `ADMIN_SECRET_KEY` in `.env`.
 
 ```bash
 curl -H "X-Admin-Key: mi-clave-super-secreta" \
@@ -32,8 +38,9 @@ curl -H "X-Admin-Key: mi-clave-super-secreta" \
 | `/watch` | Playlist radio/shuffle |
 | `/playlists` | Public playlists |
 | `/podcasts` | Channels and episodes |
-| `/auth` | OAuth administration |
-| `/stats` | Service monitoring |
+| `/auth` | Admin browser/accounts |
+| `/api-keys` | Admin API key management |
+| `/stats` | Admin monitoring |
 
 ---
 

@@ -18,6 +18,13 @@ PUBLIC_PATHS = {
     "/openapi.yaml",
 }
 
+# Admin routes handle their own auth via X-Admin-Key dependency.
+ADMIN_BYPASS_PATHS = (
+    "/api/v1/auth",
+    "/api/v1/api-keys",
+    "/api/v1/stats",
+)
+
 # Paths that require admin privileges
 ADMIN_PATHS = [
     "/api/v1/api-keys",
@@ -31,6 +38,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         """Process request and validate authentication."""
         # Skip public paths
         if request.url.path in PUBLIC_PATHS:
+            return await call_next(request)
+
+        # Skip middleware Bearer auth for admin-only paths.
+        if any(request.url.path.startswith(path) for path in ADMIN_BYPASS_PATHS):
             return await call_next(request)
         
         # Extract Authorization header

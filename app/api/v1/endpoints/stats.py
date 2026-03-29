@@ -1,10 +1,11 @@
 """Stats and monitoring endpoints."""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from typing import Dict, Any
 import logging
 
 from app.schemas.stats import StatsResponse
 from app.schemas.errors import COMMON_ERROR_RESPONSES
+from app.api.v1.endpoints.auth import verify_admin_key
 
 router = APIRouter(tags=["stats"])
 
@@ -55,7 +56,9 @@ logger = logging.getLogger(__name__)
         **COMMON_ERROR_RESPONSES
     }
 )
-async def get_stats() -> StatsResponse:
+async def get_stats(
+    _verified: None = Depends(verify_admin_key),
+) -> StatsResponse:
     """Obtiene estadísticas completas del servicio."""
     try:
         from app.core.config import get_settings

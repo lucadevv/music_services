@@ -474,7 +474,7 @@ async def create_api_key(
     from app.core.api_keys import get_api_key_manager
     
     manager = get_api_key_manager()
-    api_key = await manager.create(title=request.title, api_key=request.api_key)
+    api_key = await manager.create(title=request.title)
     
     return APIKeyResponse(
         key_id=api_key.key_id,
@@ -505,7 +505,7 @@ async def list_api_keys(
     from app.core.api_keys import get_api_key_manager
     
     manager = get_api_key_manager()
-    keys = await manager.list()
+    keys = await manager.list_all()
     
     return APIKeyListResponse(
         total=len(keys),

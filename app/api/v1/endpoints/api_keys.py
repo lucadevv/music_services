@@ -2,7 +2,7 @@
 import logging
 import secrets
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Header
 from datetime import datetime
 
 from app.core.database import get_db
@@ -15,10 +15,12 @@ from app.schemas.api_keys import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["api-keys"])
+settings = get_settings()
 
 
 async def get_admin_key_from_db(db: AsyncSession, api_key: str) -> Optional[dict]:
@@ -57,6 +59,17 @@ async def require_admin(db: AsyncSession, api_key: str) -> dict:
     return key_info
 
 
+async def verify_master_admin_key(
+    x_admin_key: Optional[str] = Header(None, alias="X-Admin-Key"),
+) -> None:
+    """Validate ADMIN_SECRET_KEY for admin-only endpoints."""
+    configured_key = settings.ADMIN_SECRET_KEY
+    if not configured_key:
+        raise HTTPException(status_code=403, detail="ADMIN_SECRET_KEY no configurado")
+    if not x_admin_key or x_admin_key != configured_key:
+        raise HTTPException(status_code=403, detail="Admin key inválida")
+
+
 @router.post(
     "/",
     response_model=APIKeyResponse,
@@ -65,7 +78,7 @@ async def require_admin(db: AsyncSession, api_key: str) -> dict:
     Crea una nueva API key para que usuarios puedan acceder a la API.
     
     ## Autenticación
-    Requires admin API key in the `Authorization` header: `Authorization: Bearer sk_admin_...`
+    Requires admin key in header: `X-Admin-Key: <ADMIN_SECRET_KEY>`
     
     ## Usage
     1. Usa tu key de admin para crear una nueva key
@@ -75,7 +88,7 @@ async def require_admin(db: AsyncSession, api_key: str) -> dict:
     ## Ejemplo
     ```bash
     curl -X POST http://localhost:8000/api/v1/api-keys/ \\
-      -H "Authorization: Bearer sk_admin_tu-key-admin" \\
+      -H "X-Admin-Key: tu-admin-secret-key" \\
       -H "Content-Type: application/json" \\
       -d '{"title": "Mi App", "description": "App móvil"}'
     ```
@@ -86,14 +99,10 @@ async def require_admin(db: AsyncSession, api_key: str) -> dict:
     },
 )
 async def create_key(
-    request: Request,
     body: APIKeyCreate,
     db: AsyncSession = Depends(get_db),
+    _verified: None = Depends(verify_master_admin_key),
 ):
-    api_key = await get_request_api_key(request)
-    
-    key_info = await require_admin(db, api_key)
-    
     # Generate new API key
     new_key = f"sk_live_{secrets.token_urlsafe(24)}"
     key_id = secrets.token_urlsafe(8)
@@ -132,7 +141,7 @@ async def create_key(
     Lista todas las API keys registradas en el sistema.
     
     ## Autenticación
-    Requires admin API key in the `Authorization` header: `Authorization: Bearer sk_admin_...`
+    Requires admin key in header: `X-Admin-Key: <ADMIN_SECRET_KEY>`
     
     ## Nota de seguridad
     Las API keys se muestran truncadas (solo los primeros 20 caracteres) por seguridad.
@@ -143,12 +152,9 @@ async def create_key(
     },
 )
 async def list_keys(
-    request: Request,
     db: AsyncSession = Depends(get_db),
+    _verified: None = Depends(verify_master_admin_key),
 ):
-    api_key = await get_request_api_key(request)
-    await require_admin(db, api_key)
-    
     result = await db.execute(
         text("SELECT key_id, api_key, title, description, enabled, is_admin, created_at, last_used FROM api_keys")
     )
@@ -178,7 +184,7 @@ async def list_keys(
     Obtiene los detalles de una API key específica por su ID.
     
     ## Autenticación
-    Requires admin API key in the `Authorization` header: `Authorization: Bearer sk_admin_...`
+    Requires admin key in header: `X-Admin-Key: <ADMIN_SECRET_KEY>`
     """,
     responses={
         401: {"description": "Invalid or disabled API key"},
@@ -187,13 +193,10 @@ async def list_keys(
     },
 )
 async def get_key(
-    request: Request,
     key_id: str,
     db: AsyncSession = Depends(get_db),
+    _verified: None = Depends(verify_master_admin_key),
 ):
-    api_key = await get_request_api_key(request)
-    await require_admin(db, api_key)
-    
     result = await db.execute(
         text("SELECT key_id, api_key, title, description, enabled, is_admin, created_at, last_used FROM api_keys WHERE key_id = :key_id"),
         {"key_id": key_id}
@@ -224,7 +227,7 @@ async def get_key(
     Actualiza el título, descripción o estado de una API key específica.
     
     ## Autenticación
-    Requires admin API key in the `Authorization` header: `Authorization: Bearer sk_admin_...`
+    Requires admin key in header: `X-Admin-Key: <ADMIN_SECRET_KEY>`
     
     ## Campos opcionales
     Solo envía los campos que deseas actualizar. Los campos no enviados permanecen sin cambios.
@@ -236,14 +239,11 @@ async def get_key(
     },
 )
 async def update_key(
-    request_http: Request,
     key_id: str,
     body: APIKeyUpdate,
     db: AsyncSession = Depends(get_db),
+    _verified: None = Depends(verify_master_admin_key),
 ):
-    api_key = await get_request_api_key(request_http)
-    await require_admin(db, api_key)
-    
     await db.execute(
         text("""
             UPDATE api_keys 
@@ -289,7 +289,7 @@ async def update_key(
     Elimina una API key por su ID.
     
     ## Autenticación
-    Requires admin API key in the `Authorization` header: `Authorization: Bearer sk_admin_...`
+    Requires admin key in header: `X-Admin-Key: <ADMIN_SECRET_KEY>`
     
     ## Restricciones
     No es posible eliminar las keys de administrador.
@@ -302,13 +302,10 @@ async def update_key(
     },
 )
 async def delete_key(
-    request: Request,
     key_id: str,
     db: AsyncSession = Depends(get_db),
+    _verified: None = Depends(verify_master_admin_key),
 ):
-    api_key = await get_request_api_key(request)
-    await require_admin(db, api_key)
-    
     # Check if trying to delete admin key
     result = await db.execute(
         text("SELECT is_admin FROM api_keys WHERE key_id = :key_id"),
@@ -335,6 +332,7 @@ async def delete_key(
 async def verify_key_endpoint(
     api_key: str,
     db: AsyncSession = Depends(get_db),
+    _verified: None = Depends(verify_master_admin_key),
 ):
     key_info = await get_admin_key_from_db(db, api_key)
     
