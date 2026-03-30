@@ -47,6 +47,22 @@ class BaseService:
         """Get the logger instance."""
         return self._logger
     
+    async def _call_ytmusic(self, func, *args, **kwargs) -> Any:
+        """
+        Execute a YTMusic call using the account-specific semaphore.
+        This prevents overloading a single account and improves stability.
+        """
+        import asyncio
+        from app.core.browser_client import current_account_var
+        
+        account = current_account_var.get()
+        if account:
+            async with account.semaphore:
+                return await asyncio.to_thread(func, *args, **kwargs)
+        else:
+            # Fallback if no account in context (should not happen with get_ytmusic)
+            return await asyncio.to_thread(func, *args, **kwargs)
+
     def _handle_ytmusic_error(
         self, 
         error: Exception, 
@@ -74,25 +90,29 @@ class BaseService:
             f"YTMusic error during '{operation}': {error_type} - {error_msg}"
         )
         
+        # Track errors in the current browser account
+        from app.core.browser_client import current_account_var
+        account = current_account_var.get()
+        
         # Authentication errors - usually means OAuth credentials are invalid or expired
-        # Patterns: JSON parsing errors, empty responses, auth failures
         if any(pattern in error_msg for pattern in [
             "Expecting value", "JSONDecodeError", "line 1 column 1", "Invalid JSON"
         ]) or "JSONDecodeError" in error_type:
+            if account: account.mark_error()
             return AuthenticationError(
                 message="Error de autenticación con YouTube Music. Verifica las credenciales.",
-                details={"operation": operation}
+                details={"operation": operation, "account": account.name if account else "unknown"}
             )
         
         # Rate limiting errors
-        # Patterns: 429 status, rate limit messages, resource exhausted
         if any(pattern in error_msg.lower() for pattern in [
             "rate limit", "429", "too many requests", "resource_exhausted",
             "rate-limit", "rate limited", "quota exceeded"
         ]):
+            if account: account.rate_limited_until = time.time() + 300 # 5 min penalty
             return RateLimitError(
                 message="Límite de peticiones excedido. Intenta más tarde.",
-                details={"operation": operation}
+                details={"operation": operation, "account": account.name if account else "unknown"}
             )
         
         # Resource not found errors

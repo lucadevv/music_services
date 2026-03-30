@@ -1,17 +1,20 @@
 """Search endpoints."""
-from fastapi import APIRouter, Depends, Query, Body
-from typing import Optional, List, Dict, Any
+from fastapi import APIRouter, Depends, Query, Body, HTTPException
+from typing import Optional, Dict, Any, Union
 from ytmusicapi import YTMusic
 
 from app.core.ytmusic_client import get_ytmusic
 from app.core.validators import validate_search_query, validate_search_filter
 from app.services.search_service import SearchService
 from app.services.stream_service import StreamService
-from app.schemas.search import SearchResponse, SearchSuggestionsResponse, RemoveSuggestionRequest
-from app.schemas.common import SuccessResponse
+from app.schemas.search import (
+    SearchResponse,
+    SearchSuggestionsResponse,
+    SearchSuggestionsDetailedResponse,
+)
 from app.schemas.errors import COMMON_ERROR_RESPONSES
 
-router = APIRouter(tags=["search"])
+router = APIRouter()
 
 
 def get_search_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> SearchService:
@@ -36,7 +39,7 @@ def get_stream_service() -> StreamService:
             "content": {
                 "application/json": {
                     "example": {
-                        "results": [
+                        "items": [
                             {
                                 "videoId": "rMbATaj7Il8",
                                 "title": "Song Title",
@@ -46,7 +49,17 @@ def get_stream_service() -> StreamService:
                                 "thumbnail": "https://..."
                             }
                         ],
-                        "query": "search query"
+                        "pagination": {
+                            "page": 1,
+                            "page_size": 10,
+                            "total_results": 1,
+                            "total_pages": 1,
+                            "start_index": 0,
+                            "end_index": 10,
+                            "has_next": False,
+                            "has_prev": False,
+                        },
+                        "query": "search query",
                     }
                 }
             }
@@ -111,22 +124,43 @@ async def search_music(
     )
 
     # Enrich songs/videos with stream URLs and thumbnails
-    if include_stream_urls and filter in ['songs', 'videos', None]:
-        items = result.get('items', [])
-        # Filter items that have videoId
-        items_to_enrich = [r for r in items if r.get('videoId')]
-        if items_to_enrich:
-            enriched_items = await stream_service.enrich_items_with_streams(
-                items_to_enrich,
-                include_stream_urls=True
-            )
-            # Map enriched items back to results
-            enriched_map = {item.get('videoId'): item for item in enriched_items if item.get('videoId')}
-            for i, item in enumerate(items):
-                video_id = item.get('videoId')
-                if video_id and video_id in enriched_map:
-                    items[i] = enriched_map[video_id]
-            result['items'] = items
+    # Only attempt enrichment if there are items with videoId
+    if include_stream_urls:
+        try:
+            items = result.get('items', [])
+            # Filter items that have videoId - artists/albums/playlists don't have videoId
+            # We check each item for videoId regardless of filter type for robustness
+            items_to_enrich = [r for r in items if isinstance(r, dict) and (r.get('videoId') or r.get('video_id'))]
+            
+            if items_to_enrich:
+                enriched_items = await stream_service.enrich_items_with_streams(
+                    items_to_enrich,
+                    include_stream_urls=True
+                )
+                
+                # Create a map of videoId to enriched item for quick lookup
+                enriched_map = {}
+                for item in enriched_items:
+                    vid = item.get('videoId') or item.get('video_id')
+                    if vid:
+                        enriched_map[vid] = item
+                
+                # Update the original results list preserving order
+                for i in range(len(items)):
+                    item = items[i]
+                    if not isinstance(item, dict):
+                        continue
+                    
+                    vid = item.get('videoId') or item.get('video_id')
+                    if vid and vid in enriched_map:
+                        # Merge enriched data (especially stream_url) into the original item
+                        items[i].update(enriched_map[vid])
+                
+                result['items'] = items
+        except Exception as enrich_error:
+            # Log but don't fail the whole request if enrichment fails
+            import logging
+            logging.getLogger(__name__).warning(f"Stream enrichment failed: {enrich_error}")
 
     result['query'] = q
     return result
@@ -134,9 +168,12 @@ async def search_music(
 
 @router.get(
     "/suggestions",
-    response_model=SearchSuggestionsResponse,
+    response_model=Union[SearchSuggestionsResponse, SearchSuggestionsDetailedResponse],
     summary="Get search suggestions",
-    description="Obtiene sugerencias de búsqueda basadas en el query parcial.",
+    description=(
+        "Sugerencias de búsqueda (ytmusicapi get_search_suggestions). "
+        "Usa detailed=true para el formato requerido por DELETE /suggestions con suggestions+indices."
+    ),
     response_description="Lista de sugerencias",
     responses={
         200: {
@@ -154,65 +191,29 @@ async def search_music(
 )
 async def get_search_suggestions(
     q: str = Query(..., description="Query parcial para obtener sugerencias", examples=["cumb"]),
-    service: SearchService = Depends(get_search_service)
-) -> SearchSuggestionsResponse:
+    detailed: bool = Query(
+        False,
+        description="Si true, devuelve objetos dict (detailed_runs=True) como en la documentación de ytmusicapi",
+    ),
+    service: SearchService = Depends(get_search_service),
+) -> Union[SearchSuggestionsResponse, SearchSuggestionsDetailedResponse]:
     """
     Obtiene sugerencias de búsqueda para autocompletado.
-    
+
     **Códigos de error:**
     - `VALIDATION_ERROR` (400): Query vacío
     - `EXTERNAL_SERVICE_ERROR` (502): Error de YouTube Music
     """
     q = validate_search_query(q)
-    suggestions = await service.get_search_suggestions(q)
-    return SearchSuggestionsResponse(suggestions=suggestions)
+    raw = await service.get_search_suggestions(q, detailed_runs=detailed)
+    if detailed:
+        if not all(isinstance(x, dict) for x in raw):
+            raise HTTPException(
+                status_code=502,
+                detail="Formato inesperado de sugerencias detalladas",
+            )
+        return SearchSuggestionsDetailedResponse(suggestions=raw)
+    return SearchSuggestionsResponse(suggestions=raw)
 
 
-@router.delete(
-    "/suggestions",
-    response_model=SuccessResponse,
-    summary="Remove search suggestions",
-    description="Elimina una sugerencia de búsqueda del historial.",
-    response_description="Resultado de la eliminación",
-    responses={
-        200: {
-            "description": "Sugerencia eliminada exitosamente",
-            "content": {
-                "application/json": {
-                    "example": {"success": True}
-                }
-            }
-        },
-        **COMMON_ERROR_RESPONSES
-    }
-)
-async def remove_search_suggestions(
-    body: Optional[Dict[str, Any]] = Body(None, description="Body con query a eliminar: {\"query\": \"test\"}"),
-    q: Optional[str] = Query(None, description="(Deprecated) Query a eliminar. Usar body en su lugar.", examples=["cumbia"]),
-    service: SearchService = Depends(get_search_service)
-) -> SuccessResponse:
-    """
-    Elimina una sugerencia de búsqueda del historial.
-    
-    Acepta query en body JSON: `{"query": "test"}` o como query param `?q=test` (deprecated).
-    
-    **Códigos de error:**
-    - `VALIDATION_ERROR` (400): Query vacío
-    - `AUTHENTICATION_ERROR` (401): Requiere autenticación
-    - `EXTERNAL_SERVICE_ERROR` (502): Error de YouTube Music
-    """
-    # Prefer body over query param
-    query = body.get("query") if body else q
-    if not query:
-        from fastapi import HTTPException
-        raise HTTPException(
-            status_code=422,
-            detail="Se requiere 'query' en el body o 'q' como query parameter"
-        )
-    
-    # Validate query
-    query = validate_search_query(query)
-    
-    # Remove suggestion - exceptions handled by global handlers
-    result = await service.remove_search_suggestions(query)
-    return SuccessResponse(success=result)
+

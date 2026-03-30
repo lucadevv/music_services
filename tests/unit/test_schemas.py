@@ -29,14 +29,6 @@ from app.schemas.explore import (
     MoodPlaylist,
     MoodPlaylistsResponse,
 )
-from app.schemas.podcast import (
-    PodcastEpisode,
-    PodcastChannelResponse,
-    PodcastEpisodeResponse,
-    PodcastResponse,
-)
-
-
 class TestSearchSchemas:
     """Test cases for search schemas."""
 
@@ -81,12 +73,13 @@ class TestSearchSchemas:
     def test_search_response(self):
         """Test SearchResponse schema."""
         response = SearchResponse(
-            results=[SearchResult(title="Song 1")],
+            items=[{"title": "Song 1", "videoId": "abc"}],
+            pagination={"page": 1, "page_size": 10, "total_results": 1, "total_pages": 1},
             query="test",
         )
-        
+
         assert response.query == "test"
-        assert len(response.results) == 1
+        assert len(response.items) == 1
 
     def test_search_suggestions_response(self):
         """Test SearchSuggestionsResponse schema."""
@@ -375,51 +368,3 @@ class TestExploreSchemas:
         )
         
         assert response.method == "direct"
-
-
-class TestPodcastSchemas:
-    """Test cases for podcast schemas."""
-
-    def test_podcast_episode(self):
-        """Test PodcastEpisode schema."""
-        episode = PodcastEpisode(
-            video_id="episode1",
-            title="Episode Title",
-            duration="45:00",
-        )
-        
-        assert episode.video_id == "episode1"
-        assert episode.duration == "45:00"
-
-    def test_podcast_channel_response(self):
-        """Test PodcastChannelResponse schema."""
-        channel = PodcastChannelResponse(
-            title="Podcast Channel",
-            channel_id="UC123",
-            episodes=[PodcastEpisode(title="Episode 1")],
-        )
-        
-        assert channel.title == "Podcast Channel"
-        assert len(channel.episodes) == 1
-
-    def test_podcast_episode_response(self):
-        """Test PodcastEpisodeResponse schema."""
-        episode = PodcastEpisodeResponse(
-            video_id="episode1",
-            title="Episode Title",
-            podcast={"title": "Parent Podcast"},
-        )
-        
-        assert episode.podcast["title"] == "Parent Podcast"
-
-    def test_podcast_response(self):
-        """Test PodcastResponse schema."""
-        podcast = PodcastResponse(
-            id="podcast123",
-            title="Tech Podcast",
-            author="Tech Host",
-            episodes=[PodcastEpisode(title="Episode 1")],
-        )
-        
-        assert podcast.title == "Tech Podcast"
-        assert podcast.author == "Tech Host"

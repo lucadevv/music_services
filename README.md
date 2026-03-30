@@ -4,6 +4,11 @@ API REST construida con **FastAPI** que wrappinga `ytmusicapi` + `yt-dlp` para p
 
 Diseñada para ser consumida por un backend NestJS dentro de un monorepo.
 
+- 🔍 **Búsqueda**: Canciones, videos, álbumes, artistas, playlists
+- 🎧 **Streaming**: URLs directas de audio (best quality)
+- 📱 **Navegación**: Artistas, álbumes, canciones, letras
+- 🔑 **Browser Admin**: Configuración de autenticación desde panel admin
+
 ## Stack
 
 | Componente | Tecnología |
@@ -114,7 +119,7 @@ Esto elimina los 403 que ocurrían cuando YouTube expira las URLs (~6h) y el end
 | GET | `/podcasts/channel/{channel_id}/episodes` | Get channel episodes |
 | GET | `/podcasts/{browse_id}` | Get podcast |
 | GET | `/podcasts/episode/{browse_id}` | Get episode |
-| GET | `/podcasts/episodes/{browse_id}/playlist` | Get episodes playlist |
+| ~~GET~~ | ~~`/podcasts/episodes/{browse_id}/playlist`~~ | ~~Get episodes playlist~~ ⚠️ DEPRECATED |
 
 ### Autenticación
 

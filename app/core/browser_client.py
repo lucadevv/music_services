@@ -1,14 +1,19 @@
 """YouTube Music client with browser authentication and rotation."""
+import asyncio
 import json
 import logging
 import random
 import time
+import contextvars
 from pathlib import Path
 from typing import Optional, List, Dict
 
 from fastapi import HTTPException
 from ytmusicapi import YTMusic
 from app.core.config import get_settings
+
+# Context variable to track the current account being used in the request
+current_account_var = contextvars.ContextVar("current_account", default=None)
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +32,11 @@ class BrowserAccount:
         self.name = path.stem
         self.last_used = 0.0
         self.error_count = 0
+        self.success_count = 0
         self.rate_limited_until = 0.0
+        self.total_requests = 0
+        # Semaphore to limit concurrent requests per account
+        self.semaphore = asyncio.Semaphore(1) # Reduced to 1 for maximum stability
     
     def is_available(self) -> bool:
         """Check if this account can be used."""
@@ -43,6 +52,14 @@ class BrowserAccount:
     def mark_error(self):
         """Mark that this account had an error."""
         self.error_count += 1
+        self.total_requests += 1
+    
+    def mark_success(self):
+        """Mark that this account had a success."""
+        self.success_count += 1
+        self.total_requests += 1
+        self.last_used = time.time()
+        self.error_count = 0
     
     def clear_errors(self):
         """Clear error count after successful operations."""
@@ -69,6 +86,10 @@ class BrowserClientManager:
                 self.accounts[name] = BrowserAccount(path)
                 logger.info(f"Found browser account: {name}")
     
+    def get_all_accounts(self) -> List[BrowserAccount]:
+        """Get all accounts regardless of availability."""
+        return list(self.accounts.values())
+
     def get_available_accounts(self) -> List[BrowserAccount]:
         """Get list of available (not rate limited) accounts."""
         return [acc for acc in self.accounts.values() if acc.is_available()]
@@ -106,8 +127,7 @@ class BrowserClientManager:
     def register_success(self, account_name: str):
         """Register a successful operation for an account."""
         if account_name in self.accounts:
-            self.accounts[account_name].clear_errors()
-            self.accounts[account_name].last_used = time.time()
+            self.accounts[account_name].mark_success()
     
     def add_account(self, name: str, headers: dict) -> str:
         """Add a new browser account from headers."""
@@ -139,15 +159,19 @@ class BrowserClientManager:
     def list_accounts(self) -> List[dict]:
         """List all browser accounts with their status."""
         self._scan_accounts()
+        # Sort by total_requests to see most used first
+        sorted_accs = sorted(self.accounts.values(), key=lambda a: a.total_requests, reverse=True)
         return [
             {
                 "name": acc.name,
                 "available": acc.is_available(),
                 "error_count": acc.error_count,
+                "success_count": acc.success_count,
+                "total_requests": acc.total_requests,
                 "rate_limited_until": acc.rate_limited_until if not acc.is_available() else None,
                 "last_used": acc.last_used,
             }
-            for acc in self.accounts.values()
+            for acc in sorted_accs
         ]
 
 
@@ -196,6 +220,12 @@ def get_ytmusic() -> YTMusic:
                 ),
             },
         )
+    
+    # Register request in account metrics
+    account.total_requests += 1
+    
+    # Store current account in context for error reporting
+    current_account_var.set(account)
     
     cache_key = account.name
     if cache_key not in _client_cache:
@@ -257,10 +287,14 @@ def get_auth_status() -> dict:
     accounts = manager.list_accounts()
     available = manager.get_available_accounts()
     
+    # Calculate usage metrics
+    total_reqs = sum(acc.get("total_requests", 0) for acc in accounts)
+    
     return {
         "authenticated": len(available) > 0,
         "total_accounts": len(accounts),
         "available_accounts": len(available),
+        "total_requests_all_accounts": total_reqs,
         "accounts": accounts,
         "method": "browser",
     }

@@ -133,7 +133,7 @@ class TestSearchSuggestions:
         result = await service.get_search_suggestions("test")
 
         assert result == ["suggestion1", "suggestion2"]
-        mock_ytmusic.get_search_suggestions.assert_called_once_with("test")
+        mock_ytmusic.get_search_suggestions.assert_called_once_with("test", False)
 
     async def test_get_search_suggestions_empty(self, mock_ytmusic):
         """Test get search suggestions with empty results."""
@@ -166,12 +166,26 @@ class TestSearchSuggestions:
 class TestRemoveSearchSuggestions:
     """Test cases for remove search suggestions."""
 
-    async def test_remove_search_suggestions(self, mock_ytmusic):
-        """Test remove search suggestion."""
+    async def test_remove_search_suggestions_native(self, mock_ytmusic):
+        """remove_search_suggestions matches ytmusicapi (list of dicts + indices)."""
+        mock_ytmusic.remove_search_suggestions.return_value = True
+        service = SearchService(mock_ytmusic)
+        payload = [{"text": "a", "fromHistory": True}]
+
+        result = await service.remove_search_suggestions(suggestions=payload, indices=[0])
+
+        assert result is True
+        mock_ytmusic.remove_search_suggestions.assert_called_once_with(payload, [0])
+
+    async def test_remove_search_suggestions_by_query(self, mock_ytmusic):
+        """Legacy path: exact text match after detailed suggestions."""
+        detailed = [{"text": "fade", "fromHistory": True}]
+        mock_ytmusic.get_search_suggestions.return_value = detailed
         mock_ytmusic.remove_search_suggestions.return_value = True
         service = SearchService(mock_ytmusic)
 
-        result = await service.remove_search_suggestions("test")
+        result = await service.remove_search_suggestions(query="fade")
 
         assert result is True
-        mock_ytmusic.remove_search_suggestions.assert_called_once_with("test")
+        mock_ytmusic.get_search_suggestions.assert_called_with("fade", True)
+        mock_ytmusic.remove_search_suggestions.assert_called_once_with(detailed, [0])

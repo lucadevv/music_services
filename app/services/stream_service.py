@@ -29,7 +29,11 @@ class StreamService(BaseService):
     
     # TTL para diferentes tipos de datos
     METADATA_TTL = 86400  # 24 horas - metadatos no cambian
-    STREAM_URL_TTL = 3600  # 1 hora - max cache real (YouTube URLs expiran ~6h pero cacheamos 1h)
+    STREAM_URL_TTL = 18000  # 5 horas - optimizado para velocidad (YouTube URLs expiran ~6h)
+
+    # Límite dinámico de concurrencia basado en cuentas
+    _extraction_semaphore = None 
+    _last_account_count = 0
     
     # Retry config
     MAX_RETRIES = 3
@@ -137,13 +141,31 @@ class StreamService(BaseService):
         except Exception as e:
             self.logger.warning(f"Error caching stream URL: {e}")
 
+    async def _get_extraction_semaphore(self):
+        """Get or create semaphore based on available accounts."""
+        from app.core.browser_client import get_browser_manager
+        
+        manager = get_browser_manager()
+        accounts = manager.get_all_accounts()
+        count = len(accounts) or 1
+        
+        # Si el número de cuentas cambió, recrear el semáforo
+        if self._extraction_semaphore is None or count != self._last_account_count:
+            # Regla: 5 hilos por cuenta para máxima velocidad segura
+            limit = count * 5
+            self._extraction_semaphore = asyncio.Semaphore(limit)
+            self._last_account_count = count
+            self.logger.info(f"🔄 Concurrency limit adjusted to {limit} (based on {count} accounts)")
+            
+        return self._extraction_semaphore
+
     async def get_stream_url(self, video_id: str, bypass_cache: bool = False) -> Dict[str, Any]:
         """
         Get audio stream URL with intelligent caching.
         
         Strategy:
         1. Check cached metadata (24 hours TTL)
-        2. Check cached stream URL (2 hours TTL)
+        2. Check cached stream URL (5 hours TTL)
         3. If both cached and valid, return immediately (0 YouTube calls)
         4. If metadata cached but stream expired, refresh only stream URL
         5. If nothing cached, fetch everything from YouTube
@@ -252,7 +274,18 @@ class StreamService(BaseService):
                     self.logger.error(f"yt-dlp extraction error: {str(e)}")
                     raise
             
-            info = await asyncio.to_thread(extract_info_with_retry)
+            # Use dynamic semaphore based on accounts
+            semaphore = await self._get_extraction_semaphore()
+            async with semaphore:
+                # Track which account is being used for this specific extraction
+                from app.core.browser_client import get_browser_manager
+                manager = get_browser_manager()
+                account = manager.get_best_account()
+                if account: account.total_requests += 1
+                
+                info = await asyncio.to_thread(extract_info_with_retry)
+                
+                if account: account.mark_success()
             
             # Buscar formato de audio
             audio_url = None
@@ -333,10 +366,12 @@ class StreamService(BaseService):
             }
             
             # Cache both metadata and stream URL
-            # Usar el TTL calculado de YouTube si está disponible
+            # Usar el TTL calculado de YouTube si está disponible (con margen de 15 min)
             await self._cache_metadata(video_id, metadata)
-            # Cache URL por máximo 1 hora (o menos si YouTube dice que expira antes)
-            cache_ttl = min(calculated_ttl, 1*3600) if url_expire else self.STREAM_URL_TTL
+            # Cache URL por máximo 5 horas (o lo que falte para que expire la URL de YouTube)
+            cache_ttl = min(calculated_ttl - 900, self.STREAM_URL_TTL) if url_expire else self.STREAM_URL_TTL
+            # Asegurar que el TTL no sea negativo
+            cache_ttl = max(60, cache_ttl)
             await self._cache_stream_url(video_id, audio_url, ttl=cache_ttl)
             
             self.logger.info(f"✅ Retrieved stream URL for: {video_id}")
@@ -371,65 +406,52 @@ class StreamService(BaseService):
             )
     
     def _get_best_thumbnail(self, item: Dict[str, Any]) -> Optional[str]:
-        """Extract the best quality thumbnail from an item."""
+        """Extract best quality thumbnail from item."""
         thumbnails = item.get('thumbnails', [])
+        video_id = item.get('videoId') or item.get('video_id')
         
-        # Get the largest thumbnail from the list
         if thumbnails and isinstance(thumbnails, list):
+            # Sort by resolution (width * height)
             sorted_thumbs = sorted(
                 thumbnails,
-                key=lambda x: (x.get('width', 0) * x.get('height', 0)),
+                key=lambda x: (x.get('width', 0) or 0) * (x.get('height', 0) or 0),
                 reverse=True
             )
-            if sorted_thumbs and sorted_thumbs[0].get('url'):
-                url = sorted_thumbs[0]['url']
-                # Try to get higher quality by modifying the URL
-                return self._enhance_thumbnail_url(url)
-        
-        # Check direct thumbnail field
-        thumbnail = item.get('thumbnail')
-        if thumbnail and isinstance(thumbnail, str):
-            return self._enhance_thumbnail_url(thumbnail)
-        
-        # Fallback to first thumbnail if available
-        if thumbnails and isinstance(thumbnails, list) and len(thumbnails) > 0:
-            first_thumb = thumbnails[0]
-            if isinstance(first_thumb, dict) and first_thumb.get('url'):
-                return self._enhance_thumbnail_url(first_thumb['url'])
-            elif isinstance(first_thumb, str):
-                return self._enhance_thumbnail_url(first_thumb)
+            best_thumb = sorted_thumbs[0]
+            
+            if isinstance(best_thumb, dict) and best_thumb.get('url'):
+                return self._enhance_thumbnail_url(best_thumb['url'], video_id)
+            elif isinstance(best_thumb, str):
+                return self._enhance_thumbnail_url(best_thumb, video_id)
         
         # Fallback: Generate thumbnail from YouTube video ID
-        video_id = item.get('videoId') or item.get('video_id')
         if video_id:
             return f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
         
         return None
     
-    def _enhance_thumbnail_url(self, url: str) -> str:
+    def _enhance_thumbnail_url(self, url: str, video_id: Optional[str] = None) -> str:
         """Enhance thumbnail URL to get higher quality image."""
         if not url:
             return url
         
         # For Googleusercontent URLs (most common from ytmusicapi)
         if 'googleusercontent.com' in url:
-            # Try to increase the size parameter (wXXX-hXXX)
-            # Common sizes: 60, 120, 226, 400, 544, 800, 1200
-            # Replace wXXX-hXXX with w800-h800 or higher
+            # Force high resolution for googleusercontent images
             enhanced = re.sub(r'=w\d+-h\d+', '=w800-h800', url)
-            self.logger.debug(f"Enhanced Google thumbnail: {url} -> {enhanced}")
             return enhanced
         
         # For i.ytimg.com URLs (YouTube video thumbnails)
-        if 'i.ytimg.com' in url:
-            # Use maxresdefault for highest quality
-            if 'maxresdefault' not in url and 'hqdefault' not in url and 'mqdefault' not in url:
-                # Extract video ID and return maxresdefault URL
+        if 'i.ytimg.com' in url or 'ytimg.com' in url:
+            if video_id:
+                # Always force maxresdefault if we have the video ID
+                return f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+            
+            # Use maxresdefault for highest quality if already a vi URL
+            if '/vi/' in url:
                 video_id_match = re.search(r'/vi/([^/]+)/', url)
                 if video_id_match:
-                    high_quality_url = f"https://i.ytimg.com/vi/{video_id_match.group(1)}/maxresdefault.jpg"
-                    self.logger.debug(f"Enhanced YouTube thumbnail: {url} -> {high_quality_url}")
-                    return high_quality_url
+                    return f"https://i.ytimg.com/vi/{video_id_match.group(1)}/maxresdefault.jpg"
         
         return url
     
@@ -493,6 +515,7 @@ class StreamService(BaseService):
         
         # Build cache keys
         cache_keys = [self._get_stream_url_cache_key(vid) for vid in video_ids]
+        self.logger.info(f"Checking cache for {len(video_ids)} video IDs")
         
         # Si bypass_cache=True, saltamos la verificación de cache
         if bypass_cache:
@@ -516,19 +539,26 @@ class StreamService(BaseService):
             
             self.logger.info(f"Cache stats: {len(cached_urls)} cached, {len(uncached_video_ids)} need fetch")
         
-        # FASE 2: Fetch uncached URLs in parallel
+        # FASE 2: Fetch uncached URLs in parallel (Optimized for FULL response)
         if uncached_video_ids:
-            self.logger.info(f"Fetching {len(uncached_video_ids)} stream URLs...")
+            semaphore = await self._get_extraction_semaphore()
+            self.logger.info(f"🚀 Fetching {len(uncached_video_ids)} stream URLs in parallel (Concurrency: {self._last_account_count * 5})...")
             
-            stream_tasks = [self._safe_get_stream_url(vid) for vid in uncached_video_ids]
-            stream_results = await asyncio.gather(*stream_tasks, return_exceptions=True)
-            
-            for i, result in enumerate(stream_results):
-                vid = uncached_video_ids[i]
-                if isinstance(result, dict):
-                    url = result.get('streamUrl') or result.get('stream_url')
-                    if url:
-                        cached_urls[vid] = url
+            # Use a longer timeout for large batches to ensure we get ALL urls
+            # but still safe for the client
+            try:
+                stream_tasks = [self._safe_get_stream_url(vid) for vid in uncached_video_ids]
+                # wait for ALL tasks to complete or fail
+                stream_results = await asyncio.gather(*stream_tasks, return_exceptions=True)
+                
+                for i, result in enumerate(stream_results):
+                    vid = uncached_video_ids[i]
+                    if isinstance(result, dict):
+                        url = result.get('streamUrl') or result.get('stream_url')
+                        if url:
+                            cached_urls[vid] = url
+            except Exception as e:
+                self.logger.error(f"Error during parallel enrichment: {e}")
         
         # FASE 3: Combine results
         enriched_items = []
@@ -538,6 +568,7 @@ class StreamService(BaseService):
             
             if video_id and video_id in cached_urls:
                 enriched_item['stream_url'] = cached_urls[video_id]
+                self.logger.info(f"Adding stream_url to {video_id}: {cached_urls[video_id][:50]}...")
             
             enriched_items.append(enriched_item)
         

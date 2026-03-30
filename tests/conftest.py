@@ -103,13 +103,6 @@ def mock_ytmusic():
     # Watch methods
     mock.get_watch_playlist.return_value = {}
     
-    # Podcast methods
-    mock.get_channel.return_value = {}
-    mock.get_channel_episodes.return_value = {}
-    mock.get_podcast.return_value = {}
-    mock.get_episode.return_value = {}
-    mock.get_episodes_playlist.return_value = {}
-    
     return mock
 
 

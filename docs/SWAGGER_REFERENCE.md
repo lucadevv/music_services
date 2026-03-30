@@ -61,9 +61,9 @@ This document is a quick human-readable reference for the generated Swagger/Open
 - `GET /api/v1/explore/category/{category_params}`
 
 ### Search
-- `GET /api/v1/search/`
-- `GET /api/v1/search/suggestions`
-- `DELETE /api/v1/search/suggestions`
+- `GET /api/v1/search/` — query param **`q`** (not `query`); response is **`items` + `pagination` + `query`**
+- `GET /api/v1/search/suggestions` — `q` required; optional **`detailed`** for ytmusicapi-shaped suggestion objects
+- `DELETE /api/v1/search/suggestions` — body: **`suggestions` + optional `indices`**, or **`query`**, or query param **`q`**
 
 ### Playlists
 - `GET /api/v1/playlists/{playlist_id}`
@@ -77,11 +77,11 @@ This document is a quick human-readable reference for the generated Swagger/Open
 - `GET /api/v1/stream/proxy/{video_id}`
 
 ### Podcasts
-- `GET /api/v1/podcasts/{browse_id}`
+- `GET /api/v1/podcasts/{browse_id}` — podcast (`get_podcast`); optional `limit` query
 - `GET /api/v1/podcasts/episode/{browse_id}`
-- `GET /api/v1/podcasts/channel/{channel_id}`
-- `GET /api/v1/podcasts/channel/{channel_id}/episodes`
-- `GET /api/v1/podcasts/episodes/{browse_id}/playlist`
+- `GET /api/v1/podcasts/channel/{channel_id}` — **`get_channel` only** (no limit query)
+- `GET /api/v1/podcasts/channel/{channel_id}/episodes` — optional **`params`** (`episodes.params` from channel response)
+- ~~`GET /api/v1/podcasts/episodes/{browse_id}/playlist`~~ — ⚠️ **DEPRECATED** — use `/podcasts/channel/{channel_id}` instead
 
 ### Stats (Admin)
 - `GET /api/v1/stats/stats`
@@ -138,9 +138,11 @@ This document is a quick human-readable reference for the generated Swagger/Open
 - `PodcastResponse`
 - `RelatedSongItem`
 - `RelatedSongsResponse`
-- `SearchResponse`
+- `SearchResponse` (`items`, `pagination`, `query`)
 - `SearchResult`
 - `SearchSuggestionsResponse`
+- `SearchSuggestionsDetailedResponse`
+- `RemoveSearchSuggestionsRequest`
 - `SongResponse`
 - `StatsResponse`
 - `StreamBatchResponse`

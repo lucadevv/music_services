@@ -10,7 +10,7 @@ from app.schemas.errors import COMMON_ERROR_RESPONSES
 from app.services.playlist_service import PlaylistService
 from app.services.stream_service import StreamService
 
-router = APIRouter(tags=["playlists"])
+router = APIRouter()
 
 
 def get_playlist_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> PlaylistService:
@@ -85,39 +85,34 @@ async def get_playlist(
     Si `include_stream_urls=true` y `prefetch_count > 0`, los primeros N tracks incluyen:
     - `stream_url`: URL directa de audio (mejor calidad)
     """
-    try:
-        playlist_data = await service.get_playlist(
-            playlist_id=playlist_id,
-            limit=limit,
-            related=related,
-            suggestions_limit=suggestions_limit,
-            start_index=start_index,
-            page=page,
-            page_size=page_size
-        )
+    playlist_data = await service.get_playlist(
+        playlist_id=playlist_id,
+        limit=limit,
+        related=related,
+        suggestions_limit=suggestions_limit,
+        start_index=start_index,
+        page=page,
+        page_size=page_size
+    )
 
-        # Enrich tracks with stream URLs
-        if include_stream_urls and prefetch_count != 0 and playlist_data.get('items'):
-            tracks = playlist_data['items']
-            tracks_to_enrich = tracks if prefetch_count == -1 else tracks[:prefetch_count]
-            tracks_remaining = [] if prefetch_count == -1 else tracks[prefetch_count:]
+    # Enrich tracks with stream URLs
+    if include_stream_urls and prefetch_count != 0 and playlist_data.get('items'):
+        tracks = playlist_data['items']
+        tracks_to_enrich = tracks if prefetch_count == -1 else tracks[:prefetch_count]
+        tracks_remaining = [] if prefetch_count == -1 else tracks[prefetch_count:]
 
-            if tracks_to_enrich:
-                enriched_tracks = await stream_service.enrich_items_with_streams(
-                    tracks_to_enrich,
-                    include_stream_urls=True
-                )
+        if tracks_to_enrich:
+            enriched_tracks = await stream_service.enrich_items_with_streams(
+                tracks_to_enrich,
+                include_stream_urls=True
+            )
 
-                if tracks_remaining:
-                    enriched_tracks.extend(tracks_remaining)
+            if tracks_remaining:
+                enriched_tracks.extend(tracks_remaining)
 
-                playlist_data['items'] = enriched_tracks
-                tracks_with_url = sum(1 for t in enriched_tracks if t.get('stream_url'))
-                playlist_data['stream_urls_prefetched'] = tracks_with_url
-                playlist_data['stream_urls_total'] = len(enriched_tracks)
+            playlist_data['items'] = enriched_tracks
+            tracks_with_url = sum(1 for t in enriched_tracks if t.get('stream_url'))
+            playlist_data['stream_urls_prefetched'] = tracks_with_url
+            playlist_data['stream_urls_total'] = len(enriched_tracks)
 
-        return playlist_data
-    except YTMusicServiceException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return playlist_data

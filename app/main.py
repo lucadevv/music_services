@@ -1,13 +1,16 @@
 """Main FastAPI application."""
 # Standard library
 import time
+import json
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 # Third-party
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer
 from fastapi.exceptions import RequestValidationError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -18,10 +21,16 @@ import yaml
 from app.core.auth_middleware import AuthMiddleware
 from app.core.config import get_settings
 
+# Increase thread pool for heavy IO operations
+import concurrent.futures
+import asyncio
+# Standard pool is min(32, os.cpu_count() + 4) which is too small for 100+ concurrent extractions
+loop = asyncio.get_event_loop()
+loop.set_default_executor(concurrent.futures.ThreadPoolExecutor(max_workers=200))
+
 from app.core.logging_config import setup_logging, get_logger
 from app.core.exceptions import YTMusicServiceException
 from app.core.exception_handlers import (
-    ytmusic_exception_handler,
     validation_exception_handler,
     generic_exception_handler,
 )
@@ -101,59 +110,49 @@ async def lifespan(app: FastAPI):
     logger.info(f"Shutting down {settings.PROJECT_NAME}")
 
 
+tags_metadata = [
+    {
+        "name": "Music",
+        "description": "Endpoints para búsqueda, navegación y streaming de contenido musical.",
+    },
+    {
+        "name": "Admin",
+        "description": "Endpoints administrativos para gestión de llaves, caché y estadísticas.",
+    },
+    {
+        "name": "general",
+        "description": "Endpoints básicos del sistema y salud.",
+    }
+]
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     description="""
-    🎵 **YouTube Music API Service** - Servicio completo de API para YouTube Music.
-    
-    ## Características
-    
-    - ✅ **Exploración**: Charts, moods, géneros, playlists públicas
-    - 🔍 **Búsqueda**: Canciones, videos, álbumes, artistas, playlists
-    - 🎧 **Streaming**: URLs directas de audio (best quality)
-    - 📱 **Navegación**: Artistas, álbumes, canciones, letras
-    - 🎙️ **Podcasts**: Canales, episodios y playlists
-    - 🔐 **Browser Admin**: Configuración de autenticación desde panel admin
-    - ⚡ **Rendimiento**: Caché inteligente, circuit breaker, rate limiting
-    
-    ## Autenticación Browser (Admin)
-    
-    Los endpoints `/api/v1/auth/*` permiten configurar la autenticación con browser headers
-    de YouTube Music desde un panel de administración. Todos requieren el header
-    `X-Admin-Key` configurado en `.env` como `ADMIN_SECRET_KEY`.
-    
-    **Flujo:**
-    1. `POST /api/v1/auth/browser/from-url` — Agregar cuenta desde URL (descarga headers)
-    2. `POST /api/v1/auth/browser/from-headers` — Agregar cuenta pasando headers directamente
-    3. `GET /api/v1/auth/browser` — Listar todas las cuentas
-    4. `DELETE /api/v1/auth/browser/{name}` — Eliminar una cuenta
-    5. `GET /api/v1/auth/status` — Consultar estado de autenticación
-    
-    ## Optimizaciones
-    
-    - **Caché inteligente**: Metadatos (1 día), Stream URLs (4 horas)
-    - **Circuit breaker**: Protección contra rate limiting de YouTube
-    - **Rate limiting**: 60 requests/minuto por IP
-    - **Compresión**: GZip para reducir ancho de banda
-    
-    ## Manejo de Errores
-    
-    La API utiliza códigos de error consistentes:
-    - `VALIDATION_ERROR` (400): Error de validación en parámetros
-    - `AUTHENTICATION_ERROR` (401): Error de autenticación con YouTube
-    - `NOT_FOUND` (404): Recurso no encontrado
-    - `RATE_LIMIT_ERROR` (429): Límite de peticiones excedido
-    - `EXTERNAL_SERVICE_ERROR` (502): Error de servicio externo
-    - `SERVICE_UNAVAILABLE` (503): Servicio temporalmente no disponible
-    - `INTERNAL_ERROR` (500): Error interno del servidor
-    
-    ## Documentación
-    
-    - **Swagger UI**: `/docs` - Interfaz interactiva
-    - **ReDoc**: `/redoc` - Documentación alternativa
-    - **OpenAPI JSON**: `/openapi.json` - Spec descargable
+🚀 **YouTube Music API Service** - Servicio de alto rendimiento para YouTube Music.
+
+Este servicio proporciona una interfaz unificada para buscar música, navegar por artistas y álbumes, gestionar listas de reproducción y obtener streams de audio directo.
+
+### 📚 Características Principales
+- 🔍 **Búsqueda Avanzada**: Canciones, álbumes, artistas y playlists.
+- 🎧 **Streaming Directo**: Obtención de URLs de audio de alta calidad.
+- 🛡️ **Resiliencia**: Circuit breaker y rate limiting integrados.
+- ⚡ **Rendimiento**: Caché inteligente en Redis y compresión GZip.
+### 🔐 Seguridad y Autenticación
+
+El servicio utiliza dos métodos de autenticación dependiendo del tipo de endpoint:
+
+1.  **Endpoints de Música (`/api/v1/music/*`)**:
+    -   Requieren una **API Key** válida.
+    -   Se debe enviar en la cabecera: `Authorization: Bearer <tu_api_key>`.
+    -   Puedes gestionar tus llaves en la sección de Admin.
+
+2.  **Endpoints de Administración (`/api/v1/admin/*`)**:
+    -   Requieren la **Master Admin Key** configurada en el servidor.
+    -   Se debe enviar en la cabecera: `X-Admin-Key: <admin_secret_key>`.
+    -   Estos endpoints NO aceptan Bearer tokens por seguridad.
     """,
+    openapi_tags=tags_metadata,
     lifespan=lifespan,
     contact={
         "name": "YouTube Music API Service",
@@ -166,10 +165,21 @@ app = FastAPI(
 )
 
 # Register exception handlers for custom exceptions
-app.add_exception_handler(YTMusicServiceException, ytmusic_exception_handler)
+@app.exception_handler(YTMusicServiceException)
+async def ytmusic_exception_handler(request: Request, exc: YTMusicServiceException):
+    """Manejador para excepciones específicas del servicio YTMusic."""
+    logger.error(f"🔥 YTMusicServiceException [{exc.status_code}]: {exc.message} - Details: {exc.details}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": True,
+            "error_code": exc.error_code,
+            "message": exc.message,
+            "details": exc.details
+        }
+    )
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
-# Uncomment to catch all unhandled exceptions (recommended for production)
-# app.add_exception_handler(Exception, generic_exception_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
 
 # Register slowapi rate limit handler
 app.state.limiter = limiter
@@ -293,11 +303,66 @@ async def health_check():
     }
 
 
-@app.get("/openapi.yaml", include_in_schema=False)
-async def openapi_yaml():
-    """Serve OpenAPI specification as YAML."""
-    openapi = app.openapi()
-    return Response(
-        content=yaml.dump(openapi, default_flow_style=False, allow_unicode=True),
-        media_type="application/x-yaml"
-    )
+limiter = Limiter(key_func=get_remote_address)
+security = HTTPBearer(auto_error=False)
+
+
+def custom_openapi():
+    """Custom OpenAPI schema with Bearer auth."""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning("custom_openapi called - generating schema")
+    
+    # Always regenerate to ensure security is included
+    app.openapi_schema = None
+    openapi_schema = app.openapi()
+    
+    # Add security schemes
+    if "components" not in openapi_schema:
+        openapi_schema["components"] = {}
+    
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "API Key",
+            "description": "API Key para endpoints de música. Obtén una en /api/v1/admin/api-keys/"
+        },
+        "AdminKey": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-Admin-Key",
+            "description": "Master Admin Key configurada en el servidor para gestión administrativa."
+        }
+    }
+
+    # Assign security to paths based on prefix
+    for path, methods in openapi_schema.get("paths", {}).items():
+        for method, config in methods.items():
+            if path.startswith(f"{settings.API_V1_STR}/admin/"):
+                config["security"] = [{"AdminKey": []}]
+            elif path.startswith(f"{settings.API_V1_STR}/music/"):
+                config["security"] = [{"BearerAuth": []}]
+            else:
+                config["security"] = []
+
+    # Cache the modified schema
+    app.openapi_schema = openapi_schema
+    
+    logger.warning("Schema generated with security")
+    
+    return openapi_schema
+
+
+# Generate the custom schema at module load time
+custom_openapi()
+
+
+app.add_api_route("/openapi.yaml", custom_openapi, include_in_schema=False)
+
+
+@app.get("/openapi.json", include_in_schema=False)
+async def openapi_json():
+    """Serve OpenAPI specification as JSON."""
+    # Return the pre-generated schema with security
+    return JSONResponse(content=app.openapi_schema)

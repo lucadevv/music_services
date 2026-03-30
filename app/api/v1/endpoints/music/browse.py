@@ -19,7 +19,7 @@ from app.schemas.errors import COMMON_ERROR_RESPONSES
 from app.services.browse_service import BrowseService
 from app.services.stream_service import StreamService
 
-router = APIRouter(tags=["browse"])
+router = APIRouter()
 
 
 def get_browse_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> BrowseService:
@@ -30,6 +30,35 @@ def get_browse_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> BrowseService
 def get_stream_service() -> StreamService:
     """Dependency to get stream service."""
     return StreamService()
+
+
+async def _enrich_home_with_streams(home_items: List[Dict[str, Any]], stream_service: StreamService) -> List[Dict[str, Any]]:
+    """
+    Enrich home content (Quick picks, playlists, albums) with stream URLs.
+    """
+    enriched_home = []
+    
+    for section in home_items:
+        contents = section.get('contents', [])
+        
+        if not contents or not isinstance(contents, list):
+            enriched_home.append(section)
+            continue
+        
+        # Check if items have videoId (songs)
+        has_songs = any(item.get('videoId') for item in contents if isinstance(item, dict))
+        
+        if has_songs:
+            # Enrich songs with stream URLs
+            enriched_contents = await stream_service.enrich_items_with_streams(
+                contents,
+                include_stream_urls=True
+            )
+            section = {**section, 'contents': enriched_contents}
+        
+        enriched_home.append(section)
+    
+    return enriched_home
 
 
 @router.get(
@@ -44,21 +73,57 @@ async def get_home(
     limit: int = Query(20, ge=1, le=50, description="Número de secciones a obtener"),
     page: int = Query(1, ge=1, le=100, description="Número de página (1-indexed)"),
     page_size: int = Query(10, ge=1, le=50, description="Items por página (máximo 50)"),
-    service: BrowseService = Depends(get_browse_service)
+    include_stream_urls: bool = Query(
+        True, 
+        description="Incluir stream URLs y mejores thumbnails para secciones de canciones"
+    ),
+    service: BrowseService = Depends(get_browse_service),
+    stream_service: StreamService = Depends(get_stream_service)
 ) -> Dict[str, Any]:
     """Obtiene el contenido de la página principal con paginación."""
-    try:
-        result = await service.get_home(
-            limit=limit,
-            page=page,
-            page_size=page_size
-        )
-        return result
-    except YTMusicServiceException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    result = await service.get_home(
+        limit=limit,
+        page=page,
+        page_size=page_size
+    )
 
+    if include_stream_urls and result.get('items'):
+        result['items'] = await _enrich_home_with_streams(result['items'], stream_service)
+
+    return result
+
+
+@router.get(
+    "/artist/{channel_id}",
+    response_model=ArtistResponse,
+    summary="Get artist information",
+    description="Obtiene información completa de un artista: metadatos, álbumes y canciones populares.",
+    response_description="Información detallada del artista",
+    responses={200: {"description": "Artista obtenido exitosamente"}, **COMMON_ERROR_RESPONSES}
+)
+async def get_artist(
+    channel_id: str = Path(..., description="ID del canal del artista", examples={"example1": {"value": "UC..."}}),
+    include_stream_urls: bool = Query(
+        True, 
+        description="Incluir stream URLs para las canciones populares del artista"
+    ),
+    service: BrowseService = Depends(get_browse_service),
+    stream_service: StreamService = Depends(get_stream_service)
+) -> Dict[str, Any]:
+    """Obtiene información de un artista."""
+    artist_data = await service.get_artist(channel_id)
+    
+    if include_stream_urls:
+        # Los artistas suelen tener una sección de 'songs' o 'top_songs'
+        songs = artist_data.get('songs', {}).get('results', [])
+        if songs:
+            enriched_songs = await stream_service.enrich_items_with_streams(
+                songs,
+                include_stream_urls=True
+            )
+            artist_data['songs']['results'] = enriched_songs
+            
+    return artist_data
 
 
 @router.get(
@@ -75,13 +140,7 @@ async def get_artist_albums(
     service: BrowseService = Depends(get_browse_service)
 ) -> Dict[str, Any]:
     """Obtiene todos los álbumes de un artista."""
-    try:
-        result = await service.get_artist_albums(channel_id, params)
-        return result
-    except YTMusicServiceException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return await service.get_artist_albums(channel_id, params)
 
 
 @router.get(
@@ -139,32 +198,26 @@ async def get_album(
     - `stream_url`: URL directa de audio (mejor calidad)
     - `thumbnail`: URL de thumbnail en mejor calidad
     """
-    try:
-        album_data = await service.get_album(
-            album_id=album_id,
-            page=page,
-            page_size=page_size
-        )
+    album_data = await service.get_album(
+        album_id=album_id,
+        page=page,
+        page_size=page_size
+    )
 
-        if include_stream_urls:
-            tracks = album_data.get('items') or album_data.get('tracks') or album_data.get('songs') or []
-            if tracks:
-                enriched_tracks = await stream_service.enrich_items_with_streams(
-                    tracks,
-                    include_stream_urls=True
-                )
-                album_data['items'] = enriched_tracks
+    if include_stream_urls:
+        tracks = album_data.get('items') or album_data.get('tracks') or album_data.get('songs') or []
+        if tracks:
+            enriched_tracks = await stream_service.enrich_items_with_streams(
+                tracks,
+                include_stream_urls=True
+            )
+            album_data['items'] = enriched_tracks
 
-        return album_data
-    except YTMusicServiceException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return album_data
 
 
 @router.get(
     "/album/{album_id}/browse-id",
-    response_model=AlbumBrowseIdResponse,
     summary="Get album browse ID",
     description="Obtiene el browse ID de un álbum a partir de su ID.",
     response_description="Browse ID del álbum",
@@ -173,15 +226,16 @@ async def get_album(
 async def get_album_browse_id(
     album_id: str = Path(..., description="ID del álbum", examples={"example1": {"value": "MPREb..."}}),
     service: BrowseService = Depends(get_browse_service)
-) -> AlbumBrowseIdResponse:
+) -> Dict[str, Any]:
     """Obtiene el browse ID de un álbum."""
-    try:
-        browse_id = await service.get_album_browse_id(album_id)
-        return AlbumBrowseIdResponse(browse_id=browse_id)
-    except YTMusicServiceException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    browse_id = await service.get_album_browse_id(album_id)
+    if browse_id is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Álbum no encontrado: {album_id}"
+        )
+    # Retornar como dict con browseId (camelCase para consistencia)
+    return {"browseId": browse_id}
 
 
 @router.get(
@@ -198,13 +252,28 @@ async def get_song(
     service: BrowseService = Depends(get_browse_service)
 ) -> Dict[str, Any]:
     """Obtiene metadatos completos de una canción."""
+    from app.services.response_service import ResponseService
+    from app.core.exceptions import ExternalServiceError
+    
+    result = await service.get_song(video_id, signature_timestamp)
+    
+    # Si el resultado no es un dict, retornar error 502
+    if not isinstance(result, dict):
+        raise ExternalServiceError(
+            message=f"YouTube Music retornó una respuesta inesperada para el video {video_id}",
+            details={"response_type": type(result).__name__ if result else "empty", "video_id": video_id}
+        )
+    
+    # Normalizar respuesta cruda del player de YouTube
     try:
-        result = await service.get_song(video_id, signature_timestamp)
-        return result
-    except YTMusicServiceException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        normalized = ResponseService.normalize_song_player_response(result)
+        return normalized
+    except (ValueError, AttributeError, TypeError) as norm_error:
+        # Si falla la normalización, retornar los datos crudos pero en formato dict
+        raise ExternalServiceError(
+            message=f"Video no disponible o información incompleta: {video_id}",
+            details={"video_id": video_id, "normalization_error": str(norm_error), "error_type": type(norm_error).__name__}
+        )
 
 
 @router.get(
@@ -243,7 +312,7 @@ async def get_song_related(
     page: int = Query(1, ge=1, le=100, description="Número de página (1-indexed)"),
     page_size: int = Query(10, ge=1, le=50, description="Canciones por página (máximo 50)"),
     include_stream_urls: bool = Query(
-        False, 
+        True, 
         description="Incluir stream URLs y mejores thumbnails"
     ),
     service: BrowseService = Depends(get_browse_service),
@@ -256,38 +325,19 @@ async def get_song_related(
     - `stream_url`: URL directa de audio (mejor calidad)
     - `thumbnail`: URL de thumbnail en mejor calidad
     """
-    from app.core.exceptions import ExternalServiceError, ResourceNotFoundError
-    
-    try:
-        result = await service.get_song_related(
-            video_id=video_id,
-            page=page,
-            page_size=page_size
+    result = await service.get_song_related(
+        video_id=video_id,
+        page=page,
+        page_size=page_size
+    )
+
+    if include_stream_urls and result.get('items'):
+        result['items'] = await stream_service.enrich_items_with_streams(
+            result['items'],
+            include_stream_urls=True
         )
 
-        if include_stream_urls and result.get('items'):
-            result['items'] = await stream_service.enrich_items_with_streams(
-                result['items'],
-                include_stream_urls=True
-            )
-
-        return result
-    except YTMusicServiceException:
-        raise
-    except Exception as e:
-        # Check if this looks like a YouTube API error that should return 502
-        error_str = str(e).lower()
-        if ("internal server error" in error_str or 
-            "500" in error_str or 
-            "youtube" in error_str or
-            "gate" in error_str or
-            "bad gateway" in error_str or
-            "502" in error_str):
-            raise ExternalServiceError(
-                message="Error en YouTube Music durante obtener canciones relacionadas. Intenta más tarde.",
-                details={"operation": "obtener canciones relacionadas", "service": "YouTube Music"}
-            )
-        raise HTTPException(status_code=500, detail=str(e))
+    return result
 
 
 @router.get(
@@ -303,13 +353,8 @@ async def get_lyrics(
     service: BrowseService = Depends(get_browse_service)
 ) -> LyricsResponse:
     """Obtiene las letras de una canción."""
-    try:
-        result = await service.get_lyrics(browse_id)
-        return LyricsResponse(**result) if isinstance(result, dict) else result
-    except YTMusicServiceException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    result = await service.get_lyrics(browse_id)
+    return LyricsResponse(**result) if isinstance(result, dict) else result
 
 
 @router.get(
@@ -325,10 +370,7 @@ async def get_lyrics_by_video(
     service: BrowseService = Depends(get_browse_service)
 ) -> LyricsResponse:
     """Obtiene las letras de una canción por su video ID."""
-    try:
-        result = await service.get_lyrics_by_video_id(video_id)
-        return LyricsResponse(**result) if isinstance(result, dict) else result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    result = await service.get_lyrics_by_video_id(video_id)
+    return LyricsResponse(**result) if isinstance(result, dict) else result
 
 

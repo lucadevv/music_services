@@ -57,6 +57,7 @@ async def verify_admin_key(
         alias="X-Admin-Key",
         description="Clave secreta de administrador (configurada en .env como ADMIN_SECRET_KEY)",
         examples=["mi-clave-super-secreta"],
+        include_in_schema=False,
     ),
 ) -> None:
     """Verify the admin key from request header."""
@@ -701,34 +702,7 @@ async def delete_api_key(
     return {"success": True, "message": "API key eliminada"}
 
 
-@router.post(
-    "/api-keys/verify",
-    response_model=APIKeyVerifyResponse,
-    summary="Verificar API key",
-    description="""
-Verifica si una API key es válida y está habilitada.
-
-**Requiere:** `X-Admin-Key` header.
-    """,
-    responses={**FORBIDDEN_RESPONSE},
-)
-async def verify_api_key_endpoint(
-    api_key: str,
-    db: AsyncSession = Depends(get_db),
-    _verified: None = Depends(verify_admin_key),
-):
-    """Verify an API key."""
-    result = await db.execute(
-        text("SELECT key_id, title, enabled FROM api_keys WHERE api_key = :api_key"),
-        {"api_key": api_key}
-    )
-    row = result.fetchone()
-
-    if not row:
-        return APIKeyVerifyResponse(valid=False)
-
-    return APIKeyVerifyResponse(
-        valid=row[2],
-        key_id=row[0],
-        title=row[1],
-    )
+# Endpoint eliminado: /api-keys/verify - ya no es necesario porque la autenticación
+# se maneja automáticamente con el middleware Bearer en cada request.
+# Para verificar si una API key es válida, simplemente hacé un request a cualquier
+# endpoint protegido - si retorna 401, la key es inválida.

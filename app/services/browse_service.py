@@ -45,7 +45,7 @@ class BrowseService(BaseService):
         self._log_operation("get_home", page=page, page_size=page_size, limit=limit)
 
         try:
-            result = await asyncio.to_thread(self.ytmusic.get_home, limit=limit)
+            result = await self._call_ytmusic(self.ytmusic.get_home, limit=limit)
             content = result if result is not None else []
             self.logger.info(f"Retrieved home page: {len(content)} sections")
 
@@ -76,7 +76,7 @@ class BrowseService(BaseService):
         self._log_operation("get_artist", channel_id=channel_id)
         
         try:
-            result = await asyncio.to_thread(self.ytmusic.get_artist, channel_id)
+            result = await self._call_ytmusic(self.ytmusic.get_artist, channel_id)
             if result is None:
                 raise ResourceNotFoundError(
                     message="Artista no encontrado.",
@@ -112,7 +112,7 @@ class BrowseService(BaseService):
         rate_limit_keywords = ['429', 'rate limit', 'quota', 'too many requests']
         
         async def fetch_albums():
-            return await asyncio.to_thread(self.ytmusic.get_artist_albums, channel_id, params)
+            return await self._call_ytmusic(self.ytmusic.get_artist_albums, channel_id, params)
         
         async def fetch_with_fallback():
             # First try: direct get_artist_albums call
@@ -188,21 +188,42 @@ class BrowseService(BaseService):
         self._log_operation("get_album", album_id=album_id, page=page, page_size=page_size)
 
         try:
-            result = await asyncio.to_thread(self.ytmusic.get_album, album_id)
+            result = await self._call_ytmusic(self.ytmusic.get_album, album_id)
             if result is None:
                 raise ResourceNotFoundError(
                     message="Álbum no encontrado.",
                     details={"resource_type": "album", "album_id": album_id}
                 )
 
-            # Extract tracks
-            tracks = result.get('tracks') or result.get('songs', [])
+            # Debug: log the keys in the result to understand structure
+            self.logger.debug(f"Album result keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}")
 
-            # Standardize tracks
-            standardized_tracks = [
-                ResponseService.standardize_song_object(track, include_stream_url=False)
-                for track in tracks
-            ]
+            # Extract tracks - handle different possible keys
+            # ytmusicapi returns tracks in 'tracks' key
+            raw_tracks = result.get('tracks') or result.get('songs') or result.get('items', [])
+            
+            # If still empty, log warning - might be ytmusicapi returning empty tracks
+            if not raw_tracks:
+                self.logger.warning(f"No tracks found for album {album_id}. Result keys: {list(result.keys())}")
+                raw_tracks = []
+
+            # Standardize tracks - only standardize items that have videoId
+            standardized_tracks = []
+            for track in raw_tracks:
+                # Skip non-dict items
+                if not isinstance(track, dict):
+                    continue
+                if track.get("videoId"):
+                    try:
+                        standardized_tracks.append(
+                            ResponseService.standardize_song_object(track, include_stream_url=True)
+                        )
+                    except (ValueError, AttributeError, TypeError) as e:
+                        self.logger.warning(f"Failed to standardize track: {e}")
+                        continue
+                else:
+                    # Keep tracks without videoId as-is (might be unavailable)
+                    standardized_tracks.append(track)
 
             # Paginate tracks
             paginated = PaginationService.paginate(
@@ -218,10 +239,10 @@ class BrowseService(BaseService):
                 "artists": result.get('artists', []),
                 "year": result.get('year'),
                 "duration": result.get('duration'),
-                "num_tracks": len(tracks)
+                "num_tracks": len(raw_tracks)
             }
 
-            self.logger.info(f"Retrieved album: {album_id} with {len(tracks)} tracks")
+            self.logger.info(f"Retrieved album: {album_id} with {len(raw_tracks)} tracks")
             return paginated
 
         except YTMusicServiceException:
@@ -277,7 +298,7 @@ class BrowseService(BaseService):
         self._log_operation("get_song", video_id=video_id)
         
         try:
-            result = await asyncio.to_thread(self.ytmusic.get_song, video_id, signature_timestamp)
+            result = await self._call_ytmusic(self.ytmusic.get_song, video_id, signature_timestamp)
             if result is None:
                 raise ResourceNotFoundError(
                     message="Canción no encontrada.",
@@ -291,6 +312,23 @@ class BrowseService(BaseService):
         except Exception as e:
             raise self._handle_ytmusic_error(e, f"obtener canción {video_id}")
     
+    @staticmethod
+    def _flatten_song_related_sections(sections: Any) -> List[Dict[str, Any]]:
+        """ytmusicapi get_song_related returns shelved sections with title + contents lists."""
+        flat: List[Dict[str, Any]] = []
+        if not isinstance(sections, list):
+            return flat
+        for sec in sections:
+            if not isinstance(sec, dict):
+                continue
+            contents = sec.get("contents")
+            if not isinstance(contents, list):
+                continue
+            for item in contents:
+                if isinstance(item, dict) and item.get("videoId"):
+                    flat.append(item)
+        return flat
+
     @cache_result(ttl=3600)
     async def get_song_related(
         self,
@@ -302,84 +340,44 @@ class BrowseService(BaseService):
         """
         Get related songs with pagination.
 
-        Args:
-            video_id: Video ID
-            page: Current page number (default: 1)
-            page_size: Number of songs per page (default: 10, max: 50)
-            max_page_size: Maximum allowed page size
-
-        Returns:
-            Related songs with pagination metadata
+        ytmusicapi: ``get_song_related(browseId)`` expects the ``related`` browse id from
+        ``get_watch_playlist(video_id)``, not the raw video id.
         """
         self._log_operation("get_song_related", video_id=video_id, page=page, page_size=page_size)
 
-        # Keywords to detect rate limit / external service errors
-        retry_keywords = ['429', 'rate limit', 'quota', 'too many requests', '500', '502', 'bad gateway', 'internal server error']
-
-        async def fetch_related():
-            return await asyncio.to_thread(self.ytmusic.get_song_related, video_id)
-        
-        async def fetch_with_fallback():
-            # First try: direct get_song_related call
-            try:
-                return await fetch_related()
-            except Exception as e:
-                error_msg = str(e).lower()
-                is_retryable = any(kw in error_msg for kw in retry_keywords)
-                if is_retryable:
-                    self.logger.warning(f"Retryable error for related songs {video_id}: {e}")
-                
-                # Second try: get song info to extract related content
-                self.logger.debug(f"get_song_related failed, trying fallback with get_song for {video_id}")
-                try:
-                    song_data = await asyncio.to_thread(self.ytmusic.get_song, video_id)
-                    if song_data:
-                        # Try to extract related content from song response
-                        related = song_data.get("related", [])
-                        if related:
-                            self.logger.info(f"Retrieved related songs via get_song fallback for {video_id}")
-                            return related
-                except Exception as fallback_error:
-                    self.logger.warning(f"Fallback also failed for {video_id}: {fallback_error}")
-                
-                # If we get here, both failed - re-raise the original exception
-                raise
-        
         try:
-            # Retry logic: attempt up to 2 times
-            max_retries = 2
-            last_error = None
+            watch = await self._call_ytmusic(self.ytmusic.get_watch_playlist, video_id)
+            if not watch:
+                raise ResourceNotFoundError(
+                    message="No se pudo obtener la playlist de reproducción para canciones relacionadas.",
+                    details={"resource_type": "song", "video_id": video_id},
+                )
+            related_browse_id = watch.get("related")
+            if not related_browse_id:
+                self.logger.info(f"Watch playlist sin pestaña 'related' para video_id={video_id}")
+                return PaginationService.paginate(
+                    [],
+                    page=page,
+                    page_size=page_size,
+                    max_page_size=max_page_size,
+                )
 
-            for attempt in range(max_retries):
-                try:
-                    result = await fetch_with_fallback()
-                    related = result if result is not None else []
-                    self.logger.info(f"Retrieved {len(related)} related songs for: {video_id} (attempt {attempt + 1})")
+            sections = await self._call_ytmusic(self.ytmusic.get_song_related, related_browse_id)
+            related_songs = self._flatten_song_related_sections(sections)
+            self.logger.info(f"Related songs flattened: {len(related_songs)} for video_id={video_id}")
 
-                    # Standardize songs
-                    standardized_songs = [
-                        ResponseService.standardize_song_object(song, include_stream_url=False)
-                        for song in related
-                    ]
-
-                    # Paginate
-                    paginated = PaginationService.paginate(
-                        standardized_songs,
-                        page=page,
-                        page_size=page_size,
-                        max_page_size=max_page_size
-                    )
-
-                    return paginated
-
-                except Exception as e:
-                    last_error = e
-                    if attempt < max_retries - 1:
-                        self.logger.warning(f"Attempt {attempt + 1} failed for related {video_id}: {e}, retrying...")
-                        await asyncio.sleep(0.5 * (attempt + 1))  # Exponential backoff
-
-            # All retries exhausted
-            raise last_error
+            standardized_songs = [
+                ResponseService.standardize_song_object(song, include_stream_url=True)
+                for song in related_songs
+            ]
+            return PaginationService.paginate(
+                standardized_songs,
+                page=page,
+                page_size=page_size,
+                max_page_size=max_page_size,
+            )
+        except YTMusicServiceException:
+            raise
         except Exception as e:
             raise self._handle_ytmusic_error(e, f"obtener canciones relacionadas de {video_id}")
     
@@ -398,7 +396,7 @@ class BrowseService(BaseService):
         
         try:
             # First get the watch playlist to find the lyrics browse ID
-            watch_playlist = await asyncio.to_thread(self.ytmusic.get_watch_playlist, video_id)
+            watch_playlist = await self._call_ytmusic(self.ytmusic.get_watch_playlist, video_id)
             
             # Check if watch playlist has lyrics
             if not watch_playlist:
@@ -412,7 +410,7 @@ class BrowseService(BaseService):
                 return {"lyrics": None, "source": None, "error": "No lyrics available"}
             
             # Now get the actual lyrics
-            result = await asyncio.to_thread(self.ytmusic.get_lyrics, lyrics_browse_id)
+            result = await self._call_ytmusic(self.ytmusic.get_lyrics, lyrics_browse_id)
             lyrics = result if result is not None else {}
             self.logger.info(f"Retrieved lyrics for video: {video_id}")
             return lyrics
@@ -434,7 +432,7 @@ class BrowseService(BaseService):
         self._log_operation("get_lyrics", browse_id=browse_id)
         
         try:
-            result = await asyncio.to_thread(self.ytmusic.get_lyrics, browse_id)
+            result = await self._call_ytmusic(self.ytmusic.get_lyrics, browse_id)
             lyrics = result if result is not None else {}
             self.logger.info(f"Retrieved lyrics for: {browse_id}")
             return lyrics

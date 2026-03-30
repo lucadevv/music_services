@@ -189,35 +189,49 @@ class TestGetSong:
 
 @pytest.mark.asyncio
 class TestGetSongRelated:
-    """Test cases for get_song_related method."""
+    """Test cases for get_song_related method (watch playlist -> related browseId -> sections)."""
 
     async def test_get_song_related_success(self, mock_ytmusic):
-        """Test successful get_song_related."""
-        related = [{"videoId": "rel1", "title": "Related Song"}]
-        mock_ytmusic.get_song_related.return_value = related
+        """Flatten sections from ytmusicapi get_song_related."""
+        mock_ytmusic.get_watch_playlist.return_value = {
+            "related": "RELATED_BROWSE_ID_DUMMY",
+            "tracks": [],
+        }
+        mock_ytmusic.get_song_related.return_value = [
+            {
+                "title": "You might also like",
+                "contents": [{"videoId": "rel1", "title": "Related Song"}],
+            }
+        ]
         service = BrowseService(mock_ytmusic)
-        
-        result = await service.get_song_related("abc123")
-        
-        assert result == related
 
-    async def test_get_song_related_empty(self, mock_ytmusic):
-        """Test get_song_related with no results."""
+        result = await service.get_song_related("abc123")
+
+        assert "items" in result
+        assert len(result["items"]) == 1
+        assert result["items"][0]["videoId"] == "rel1"
+        mock_ytmusic.get_watch_playlist.assert_called_once_with("abc123")
+        mock_ytmusic.get_song_related.assert_called_once_with("RELATED_BROWSE_ID_DUMMY")
+
+    async def test_get_song_related_empty_sections(self, mock_ytmusic):
+        """No video rows in sections -> empty paginated items."""
+        mock_ytmusic.get_watch_playlist.return_value = {"related": "RID", "tracks": []}
         mock_ytmusic.get_song_related.return_value = []
         service = BrowseService(mock_ytmusic)
-        
-        result = await service.get_song_related("abc123")
-        
-        assert result == []
 
-    async def test_get_song_related_none(self, mock_ytmusic):
-        """Test get_song_related when ytmusic returns None."""
-        mock_ytmusic.get_song_related.return_value = None
-        service = BrowseService(mock_ytmusic)
-        
         result = await service.get_song_related("abc123")
-        
-        assert result == []
+
+        assert result["items"] == []
+
+    async def test_get_song_related_no_related_tab(self, mock_ytmusic):
+        """Missing related browse id -> empty page."""
+        mock_ytmusic.get_watch_playlist.return_value = {"tracks": [], "related": None}
+        service = BrowseService(mock_ytmusic)
+
+        result = await service.get_song_related("abc123")
+
+        assert result["items"] == []
+        mock_ytmusic.get_song_related.assert_not_called()
 
 
 @pytest.mark.asyncio

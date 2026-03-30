@@ -23,7 +23,7 @@ def setup_logging(
         Configured logger instance.
     """
     if level is None:
-        level = "DEBUG" if settings.VERSION.endswith("-dev") else "INFO"
+        level = "DEBUG"
     
     if format_string is None:
         format_string = (

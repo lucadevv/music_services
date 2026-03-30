@@ -49,9 +49,10 @@ class ChartsTrack(BaseModel):
 class ChartsResponse(BaseModel):
     """Response for charts endpoint."""
     
-    top_songs: Optional[List[ChartsTrack]] = Field(None, description="Top songs chart")
-    trending: Optional[List[ChartsTrack]] = Field(None, description="Trending songs")
+    charts: Optional[List[ChartsTrack]] = Field(None, description="Top songs chart")
+    trending: Optional[List[Dict[str, Any]]] = Field(None, description="Trending playlists (Daily Top Music Videos)")
     country: Optional[str] = Field(None, description="Country code or 'global'")
+    pagination: Optional[Dict[str, Any]] = Field(None, description="Pagination metadata")
 
 
 class ExploreResponse(BaseModel):
@@ -82,9 +83,18 @@ class MoodPlaylist(BaseModel):
 
 
 class MoodPlaylistsResponse(BaseModel):
-    """Response for mood playlists endpoint."""
-    
+    """Legacy shape (playlists list); prefer MoodPlaylistsPaginatedResponse for /explore/moods/{params}."""
+
     playlists: List[MoodPlaylist] = Field(..., description="List of playlists")
     method: Optional[str] = Field(None, description="Method used: direct, search, alternative_search")
     genre_name: Optional[str] = Field(None, description="Genre name used for search")
     message: Optional[str] = Field(None, description="Additional information")
+
+
+class MoodPlaylistsPaginatedResponse(BaseModel):
+    """Paginated mood/genre playlists (matches ExploreService.get_mood_playlists)."""
+
+    items: List[Dict[str, Any]] = Field(default_factory=list, description="Playlists standardized")
+    pagination: Dict[str, Any] = Field(default_factory=dict, description="Pagination metadata")
+
+    model_config = ConfigDict(extra="allow")

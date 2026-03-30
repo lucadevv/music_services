@@ -55,57 +55,88 @@ curl -H "X-Admin-Key: mi-clave-super-secreta" \
 
 ### GET /search/
 
-Search for music content.
+Search for music content (wraps [ytmusicapi `search`](https://ytmusicapi.readthedocs.io/en/stable/reference/search.html)).
 
 **Parameters:**
 | Name | Type | In | Description |
 |------|------|-----|-------------|
-| `query` | string | query | Search query |
-| `filter` | string | query | Filter type (songs, videos, albums, artists, playlists) |
-| `limit` | integer | query | Max results (default: 20) |
+| `q` | string | query | **Required.** Search query (not `query`) |
+| `filter` | string | query | Optional: `songs`, `videos`, `albums`, `artists`, `playlists`, etc. |
+| `scope` | string | query | Optional: `library`, `uploads` (restricts allowed filters per ytmusicapi) |
+| `limit` | integer | query | Max results requested from YTM (default: 10, max: 50) |
+| `page` | integer | query | Page number (1-based) |
+| `page_size` | integer | query | Items per page (default: 10, max: 50) |
+| `start_index` | integer | query | Legacy offset |
+| `ignore_spelling` | boolean | query | Exact term search when true |
+| `include_stream_urls` | boolean | query | Enrich `songs` / `videos` with `stream_url` + thumbnail (default: true) |
 
-**Response:** `200 OK`
+**Response:** `200 OK` — paginated list (`items` + `pagination` + `query`), not `results`.
+
 ```json
 {
-  "results": [
+  "items": [
     {
       "videoId": "dQw4w9WgXcQ",
       "title": "Song Title",
       "artists": [{"name": "Artist Name"}],
       "album": {"name": "Album Name"},
-      "duration": "3:45",
-      "thumbnail": "https://..."
+      "duration": 225,
+      "duration_text": "3:45",
+      "thumbnail": "https://...",
+      "stream_url": "https://..."
     }
-  ]
+  ],
+  "pagination": {
+    "total_results": 42,
+    "total_pages": 5,
+    "page": 1,
+    "page_size": 10,
+    "start_index": 0,
+    "end_index": 10,
+    "has_next": true,
+    "has_prev": false
+  },
+  "query": "eminem"
 }
 ```
 
 ### GET /search/suggestions
 
-Get search suggestions.
+Autocomplete suggestions ([ytmusicapi `get_search_suggestions`](https://ytmusicapi.readthedocs.io/en/stable/reference/search.html)).
 
 **Parameters:**
 | Name | Type | In | Description |
 |------|------|-----|-------------|
-| `query` | string | query | Search query |
+| `q` | string | query | **Required.** Partial query |
+| `detailed` | boolean | query | If `true`, returns the same **dict** objects YTMusic uses for history removal (see DELETE below). Default `false` returns plain strings. |
 
 **Response:** `200 OK`
+
+Plain (`detailed=false`):
+
 ```json
 {
   "suggestions": ["song name", "artist name"]
 }
 ```
 
+Detailed (`detailed=true`): each item includes fields such as `text`, `runs`, `fromHistory`, `feedbackToken` (shape defined by ytmusicapi).
+
 ### DELETE /search/suggestions
 
-Remove a search suggestion.
+Remove entries from the **signed-in** search suggestion history ([ytmusicapi `remove_search_suggestions`](https://ytmusicapi.readthedocs.io/en/stable/reference/search.html)). The server’s YTMusic client must use authenticated headers/OAuth; otherwise the upstream call may fail with an external error.
 
-**Parameters:**
-| Name | Type | In | Description |
-|------|------|-----|-------------|
-| `suggestion` | string | query | Suggestion to remove |
+**Options (choose one):**
+
+1. **Body (recommended):** JSON with `suggestions` (list of dicts from `GET /search/suggestions?q=...&detailed=true`) and optional `indices` (list of indexes into that list; omit per ytmusicapi semantics with care).
+2. **Body (legacy):** `{ "query": "<exact suggestion text>" }` — must match a suggestion’s `text` field exactly after a detailed fetch.
+3. **Query:** `q=<exact suggestion text>` if no body.
 
 **Response:** `200 OK`
+
+```json
+{ "success": true }
+```
 
 ---
 
@@ -484,85 +515,73 @@ Get playlist information.
 
 ## Podcasts
 
+Aligned with [ytmusicapi podcasts reference](https://ytmusicapi.readthedocs.io/en/stable/reference/podcasts.html): channel and episode listing use the argument types the library expects (no extra `limit` on `get_channel` / `get_episodes_playlist`).
+
 ### GET /podcasts/channel/{channel_id}
 
-Get podcast channel.
+Podcast channel metadata and embedded episode/previews (`YTMusic.get_channel(channelId)`).
 
 **Parameters:**
 | Name | Type | In | Description |
 |------|------|-----|-------------|
-| `channel_id` | string | path | Channel ID |
+| `channel_id` | string | path | Channel ID (e.g. `UC...`) |
 
-**Response:** `200 OK`
-```json
-{
-  "channel": {...}
-}
-```
+**Response:** `200 OK` — JSON shape returned by ytmusicapi (title, thumbnails, `episodes`, `podcasts`, etc.).
 
 ### GET /podcasts/channel/{channel_id}/episodes
 
-Get channel episodes.
+Full episode list for a channel (`YTMusic.get_channel_episodes(channelId, params)`).
 
 **Parameters:**
 | Name | Type | In | Description |
 |------|------|-----|-------------|
 | `channel_id` | string | path | Channel ID |
+| `params` | string | query | Continuation string: use `episodes.params` from the `GET .../channel/{id}` response. If omitted, the service calls `get_channel` and uses that `params` when present. |
 
 **Response:** `200 OK`
+
 ```json
 {
-  "episodes": [...]
+  "episodes": [ ... ]
 }
 ```
 
 ### GET /podcasts/{browse_id}
 
-Get podcast.
+Podcast show + episodes (`YTMusic.get_podcast(playlistId, limit)`).
 
 **Parameters:**
 | Name | Type | In | Description |
 |------|------|-----|-------------|
-| `browse_id` | string | path | Browse ID |
+| `browse_id` | string | path | Podcast playlist / browse id (e.g. `MPSP...`) |
+| `limit` | integer | query | Max episodes (optional; see OpenAPI default) |
 
-**Response:** `200 OK`
-```json
-{
-  "podcast": {...}
-}
-```
+**Response:** `200 OK` — ytmusicapi podcast dict.
 
 ### GET /podcasts/episode/{browse_id}
 
-Get episode.
+Single episode (`YTMusic.get_episode` — browse id `MPED...` or video id as supported by ytmusicapi).
 
 **Parameters:**
 | Name | Type | In | Description |
 |------|------|-----|-------------|
-| `browse_id` | string | path | Browse ID |
+| `browse_id` | string | path | Episode id |
 
 **Response:** `200 OK`
-```json
-{
-  "episode": {...}
-}
-```
 
-### GET /podcasts/episodes/{browse_id}/playlist
+### GET /podcasts/episodes/{browse_id}/playlist ⚠️ DEPRECATED
 
-Get episodes playlist.
+> ⚠️ **DEPRECATED**: Este endpoint ha sido marcado como deprecated. Use `/podcasts/channel/{channel_id}` en su lugar.
+> Response header: `Warning: 299 - "Deprecated: Use /podcasts/channel/{channel_id} instead"`
+
+~~Auto-generated **episodes playlist** (`YTMusic.get_episodes_playlist(playlist_id)`). Default in YouTube Music is often `RDPN` ("New episodes").~~
 
 **Parameters:**
 | Name | Type | In | Description |
 |------|------|-----|-------------|
-| `browse_id` | string | path | Browse ID |
+| `browse_id` | string | path | **Playlist id** (path name is historical; value is `playlist_id`, e.g. `RDPN`) |
 
-**Response:** `200 OK`
-```json
-{
-  "playlist": {...}
-}
-```
+**Response:** `200 OK` — ytmusicapi dict.
 
 ---
 

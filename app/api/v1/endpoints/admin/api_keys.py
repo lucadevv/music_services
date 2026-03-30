@@ -19,7 +19,7 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["api-keys"])
+router = APIRouter()
 settings = get_settings()
 
 
@@ -60,7 +60,7 @@ async def require_admin(db: AsyncSession, api_key: str) -> dict:
 
 
 async def verify_master_admin_key(
-    x_admin_key: Optional[str] = Header(None, alias="X-Admin-Key"),
+    x_admin_key: Optional[str] = Header(None, alias="X-Admin-Key", include_in_schema=False),
 ) -> None:
     """Validate ADMIN_SECRET_KEY for admin-only endpoints."""
     configured_key = settings.ADMIN_SECRET_KEY
@@ -323,27 +323,7 @@ async def delete_key(
     return {"success": True, "message": "API key deleted"}
 
 
-@router.post(
-    "/verify",
-    response_model=APIKeyVerifyResponse,
-    summary="Verify API key",
-    description="Verify if an API key is valid and enabled.",
-)
-async def verify_key_endpoint(
-    api_key: str,
-    db: AsyncSession = Depends(get_db),
-    _verified: None = Depends(verify_master_admin_key),
-):
-    key_info = await get_admin_key_from_db(db, api_key)
-    
-    if not key_info:
-        return APIKeyVerifyResponse(valid=False)
-    
-    if not key_info["enabled"]:
-        return APIKeyVerifyResponse(valid=False)
-    
-    return APIKeyVerifyResponse(
-        valid=True,
-        key_id=key_info["key_id"],
-        title=key_info["title"],
-    )
+# DEPRECATED: El endpoint de verificación ya no es necesario.
+# La autenticación se maneja automáticamente con el middleware Bearer en cada request.
+# Para verificar si una API key es válida, simplemente hacé un request a cualquier
+# endpoint protegido - si retorna 401, la key es inválida.

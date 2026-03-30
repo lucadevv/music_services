@@ -12,7 +12,7 @@ from app.schemas.errors import COMMON_ERROR_RESPONSES
 from app.services.watch_service import WatchService
 from app.services.stream_service import StreamService
 
-router = APIRouter(tags=["watch"])
+router = APIRouter()
 
 # In-memory rate limiting para evitar llamadas duplicadas rápidas
 # Key: video_id or playlist_id, Value: (timestamp, result)
@@ -81,7 +81,7 @@ async def get_watch_playlist(
     radio: bool = Query(False, description="Obtener playlist de radio"),
     shuffle: bool = Query(False, description="Obtener playlist en modo shuffle"),
     include_stream_urls: bool = Query(
-        False, 
+        True, 
         description="Incluir stream URLs y mejores thumbnails para tracks"
     ),
     prefetch_count: int = Query(
@@ -115,6 +115,13 @@ async def get_watch_playlist(
             detail="Se requiere 'video_id' o 'playlist_id'"
         )
 
+    # shuffle=True requiere playlist_id según ytmusicapi
+    if shuffle and not playlist_id:
+        raise HTTPException(
+            status_code=400,
+            detail="shuffle=True requiere playlist_id (no funciona con solo video_id)"
+        )
+
     # Deduplicación en memoria para evitar llamadas duplicadas rápidas
     request_key = f"{video_id or playlist_id}:{start_index}:{limit}:{page}"
     current_time = time.time()
@@ -129,44 +136,39 @@ async def get_watch_playlist(
             if current_time - cached_time < _REQUEST_TTL:
                 return cached_result
 
-    try:
-        playlist_data = await service.get_watch_playlist(
-            video_id=video_id,
-            playlist_id=playlist_id,
-            limit=limit,
-            radio=radio,
-            shuffle=shuffle,
-            page=page,
-            page_size=page_size
-        )
+    playlist_data = await service.get_watch_playlist(
+        video_id=video_id,
+        playlist_id=playlist_id,
+        limit=limit,
+        radio=radio,
+        shuffle=shuffle,
+        page=page,
+        page_size=page_size
+    )
 
-        # Enrich tracks with stream URLs
-        if include_stream_urls and prefetch_count != 0:
-            tracks = playlist_data.get('items') or []
-            if tracks:
-                tracks_to_enrich = tracks if prefetch_count == -1 else tracks[:prefetch_count]
-                tracks_remaining = [] if prefetch_count == -1 else tracks[prefetch_count:]
+    # Enrich tracks with stream URLs
+    if include_stream_urls and prefetch_count != 0:
+        tracks = playlist_data.get('items') or []
+        if tracks:
+            tracks_to_enrich = tracks if prefetch_count == -1 else tracks[:prefetch_count]
+            tracks_remaining = [] if prefetch_count == -1 else tracks[prefetch_count:]
 
-                if tracks_to_enrich:
-                    enriched_tracks = await stream_service.enrich_items_with_streams(
-                        tracks_to_enrich,
-                        include_stream_urls=True
-                    )
+            if tracks_to_enrich:
+                enriched_tracks = await stream_service.enrich_items_with_streams(
+                    tracks_to_enrich,
+                    include_stream_urls=True
+                )
 
-                    if tracks_remaining:
-                        enriched_tracks.extend(tracks_remaining)
+                if tracks_remaining:
+                    enriched_tracks.extend(tracks_remaining)
 
-                    playlist_data['items'] = enriched_tracks
-                    tracks_with_url = sum(1 for t in enriched_tracks if t.get('stream_url'))
-                    playlist_data['stream_urls_prefetched'] = tracks_with_url
-                    playlist_data['stream_urls_total'] = len(enriched_tracks)
+                playlist_data['items'] = enriched_tracks
+                tracks_with_url = sum(1 for t in enriched_tracks if t.get('stream_url'))
+                playlist_data['stream_urls_prefetched'] = tracks_with_url
+                playlist_data['stream_urls_total'] = len(enriched_tracks)
 
-        # Guardar en cache en memoria para deduplicación
-        async with _request_lock:
-            _recent_requests[request_key] = (current_time, playlist_data)
+    # Guardar en cache en memoria para deduplicación
+    async with _request_lock:
+        _recent_requests[request_key] = (current_time, playlist_data)
 
-        return playlist_data
-    except YTMusicServiceException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return playlist_data

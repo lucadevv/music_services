@@ -6,12 +6,17 @@ from ytmusicapi import YTMusic
 
 from app.core.ytmusic_client import get_ytmusic
 from app.core.exceptions import YTMusicServiceException
-from app.schemas.explore import ExploreResponse, MoodCategoriesResponse, MoodPlaylistsResponse, ChartsResponse
+from app.schemas.explore import (
+    ExploreResponse,
+    MoodCategoriesResponse,
+    MoodPlaylistsPaginatedResponse,
+    ChartsResponse,
+)
 from app.schemas.errors import COMMON_ERROR_RESPONSES
 from app.services.explore_service import ExploreService
 from app.services.stream_service import StreamService
 
-router = APIRouter(tags=["explore"])
+router = APIRouter()
 
 
 async def _enrich_home_with_streams(home: List[Dict[str, Any]], stream_service: StreamService) -> List[Dict[str, Any]]:
@@ -99,7 +104,7 @@ def get_explore_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> ExploreServi
 )
 async def explore_music(
     include_stream_urls: bool = Query(
-        False, 
+        True, 
         description="Incluir stream URLs y mejores thumbnails para charts"
     ),
     limit: int = Query(
@@ -301,21 +306,16 @@ async def get_mood_categories(
     - `params`: Usar en `/explore/moods/{params}` para obtener playlists
     - `title`: Nombre de la categoría
     """
-    try:
-        categories = await service.get_mood_categories()
-        return {
-            "categories": categories,
-            "structure": "Las categorías están organizadas en secciones: 'For you', 'Genres', 'Moods & moments'"
-        }
-    except YTMusicServiceException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    categories = await service.get_mood_categories()
+    return {
+        "categories": categories,
+        "structure": "Las categorías están organizadas en secciones: 'For you', 'Genres', 'Moods & moments'"
+    }
 
 
 @router.get(
     "/moods/{params}",
-    response_model=MoodPlaylistsResponse,
+    response_model=MoodPlaylistsPaginatedResponse,
     summary="Get mood/genre playlists",
     description="Obtiene playlists de una categoría de mood o género usando sus parámetros codificados.",
     response_description="Lista de playlists de la categoría",
@@ -348,17 +348,40 @@ async def get_mood_playlists(
     Usa los `params` de una categoría obtenida en `/explore/moods` o `/explore`.
     Los params son valores codificados como `ggMPOg1uX1JOQWZFeDByc2Jm`.
     """
+    from app.core.exceptions import ExternalServiceError
+    
     try:
-        result = await service.get_mood_playlists(
+        return await service.get_mood_playlists(
             params=params,
             page=page,
             page_size=page_size
         )
-        return result
-    except YTMusicServiceException:
+    except ExternalServiceError:
+        # If primary method fails, try alternative search-based approach
+        genre_name = await service.get_genre_name_from_params(params)
+        if genre_name:
+            try:
+                alt_results = await service.get_mood_playlists_alternative(
+                    genre_name=genre_name,
+                    limit=page_size
+                )
+                return {
+                    "items": alt_results,
+                    "pagination": {
+                        "total_results": len(alt_results),
+                        "total_pages": 1,
+                        "page": page,
+                        "page_size": page_size,
+                        "has_next": False,
+                        "has_prev": False
+                    }
+                }
+            except Exception as alt_e:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"No se pudieron obtener playlists para '{genre_name}': {str(alt_e)}"
+                )
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get(
@@ -399,7 +422,7 @@ async def get_charts(
     page: int = Query(1, ge=1, le=100, description="Número de página"),
     page_size: int = Query(10, ge=1, le=50, description="Canciones por página"),
     include_stream_urls: bool = Query(
-        False, 
+        True, 
         description="Incluir stream URLs y mejores thumbnails"
     ),
     service: ExploreService = Depends(get_explore_service)
@@ -415,81 +438,45 @@ async def get_charts(
     - `stream_url`: URL directa de audio (mejor calidad)
     - `thumbnail`: URL de thumbnail en mejor calidad
     """
-    try:
-        charts = await service.get_charts(
-            country=country,
-            page=page,
-            page_size=page_size
-        )
+    charts = await service.get_charts(
+        country=country,
+        page=page,
+        page_size=page_size
+    )
 
-        top_songs_data = charts.get('charts', {}).get('items', [])
-        if not top_songs_data:
-            top_songs_data = charts.get('top_songs', [])
+    top_songs_data = charts.get('charts', {}).get('items', [])
+    if not top_songs_data:
+        top_songs_data = charts.get('top_songs', [])
 
-        trending_data = charts.get('trending', [])
-        if not trending_data:
-            trending_data = top_songs_data
+    trending_data = charts.get('trending', [])
+    if not trending_data:
+        trending_data = top_songs_data
 
-        # Enrich with stream URLs and thumbnails
-        if include_stream_urls:
-            from app.services.stream_service import StreamService
-            stream_service = StreamService()
+    # Enrich with stream URLs and thumbnails
+    if include_stream_urls:
+        from app.services.stream_service import StreamService
+        stream_service = StreamService()
 
-            # Enrich top_songs
-            if top_songs_data:
-                top_songs_data = await stream_service.enrich_items_with_streams(
-                    top_songs_data,
-                    include_stream_urls=True
-                )
+        # Enrich top_songs
+        if top_songs_data:
+            top_songs_data = await stream_service.enrich_items_with_streams(
+                top_songs_data,
+                include_stream_urls=True
+            )
 
-            # Enrich trending
-            if trending_data:
-                trending_data = await stream_service.enrich_items_with_streams(
-                    trending_data,
-                    include_stream_urls=True
-                )
+        # Enrich trending
+        if trending_data:
+            trending_data = await stream_service.enrich_items_with_streams(
+                trending_data,
+                include_stream_urls=True
+            )
 
-        response = {
-            "charts": top_songs_data,
-            "trending": trending_data,
-            "country": country or "global",
-            "pagination": charts.get('charts', {}).get('pagination', {})
-        }
-
-        return response
-    except YTMusicServiceException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "charts": top_songs_data,
+        "trending": trending_data,
+        "country": country or "global",
+        "pagination": charts.get('charts', {}).get('pagination', {})
+    }
 
 
-@router.get(
-    "/category/{category_params}",
-    response_model=Dict[str, Any],
-    summary="Get category playlists (alias) - DEPRECATED",
-    description="Alias para `/explore/moods/{params}`. Obtiene playlists de una categoría. ⚠️ ENDPOINT DEPRECADO - usar `/explore/moods/{params}` en su lugar.",
-    response_description="Lista de playlists de la categoría",
-    responses={200: {"description": "Playlists obtenidas exitosamente"}, **COMMON_ERROR_RESPONSES}
-)
-async def get_category(
-    category_params: str = Path(..., description="Params de la categoría", examples={"example1": {"value": "ggMPOg1uX3hRRFdlaEhHU09k"}}),
-    service: ExploreService = Depends(get_explore_service)
-) -> Dict[str, Any]:
-    """
-    Obtiene playlists de una categoría (alias de `/explore/moods/{params}`).
-    
-    ⚠️ ENDPOINT DEPRECADO: Usa `/explore/moods/{params}` en su lugar.
-    
-    Usa el `params` de una categoría de mood/género para obtener sus playlists.
-    """
-    from fastapi.responses import JSONResponse
-    try:
-        result = await service.get_mood_playlists(category_params)
-        return JSONResponse(
-            content={"playlists": result},
-            headers={"Warning": "299 - \"Deprecated: Use /explore/moods/{params} instead\""}
-        )
-    except YTMusicServiceException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error cargando categoría: {str(e)}")
+

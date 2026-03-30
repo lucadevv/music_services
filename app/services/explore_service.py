@@ -37,7 +37,7 @@ class ExploreService(BaseService):
         self._log_operation("get_mood_categories")
         
         try:
-            result = await asyncio.to_thread(self.ytmusic.get_mood_categories)
+            result = await self._call_ytmusic(self.ytmusic.get_mood_categories)
             categories = result if result is not None else {}
             self.logger.info(f"Retrieved {len(categories)} mood categories")
             return categories
@@ -67,14 +67,34 @@ class ExploreService(BaseService):
         self._log_operation("get_mood_playlists", params=params, page=page, page_size=page_size)
 
         try:
-            result = await asyncio.to_thread(self.ytmusic.get_mood_playlists, params)
-            playlists = result if result is not None else []
+            result = await self._call_ytmusic(self.ytmusic.get_mood_playlists, params)
+            
+            # Validate result is a list - ytmusicapi might return unexpected types
+            if not isinstance(result, list):
+                self.logger.warning(f"get_mood_playlists returned {type(result).__name__}, expected list: {result}")
+                playlists = []
+            else:
+                playlists = result
 
-            # Standardize playlists
-            standardized_playlists = [
-                ResponseService.standardize_song_object(playlist, include_stream_url=False)
-                for playlist in playlists
-            ]
+            # Standardize playlists - they have playlistId, not videoId
+            # Don't use standardize_song_object which requires videoId
+            standardized_playlists = []
+            for playlist in playlists:
+                # Skip non-dict items - ytmusicapi might return strings or other types
+                if not isinstance(playlist, dict):
+                    self.logger.warning(f"Skipping non-dict playlist item: {type(playlist).__name__}: {playlist}")
+                    continue
+                if playlist.get("playlistId") or playlist.get("browseId"):
+                    standardized_playlists.append({
+                        "playlist_id": playlist.get("playlistId"),
+                        "browse_id": playlist.get("browseId"),
+                        "title": playlist.get("title", ""),
+                        "thumbnails": playlist.get("thumbnails", []),
+                        "thumbnail": playlist.get("thumbnails", [{}])[0].get("url") if playlist.get("thumbnails") else None,
+                        "description": playlist.get("description", ""),
+                        "author": playlist.get("author", []),
+                        "count": playlist.get("count"),
+                    })
 
             # Paginate
             paginated = PaginationService.paginate(
@@ -87,14 +107,30 @@ class ExploreService(BaseService):
             self.logger.info(f"Retrieved mood playlists for params: {params}")
             return paginated
 
-        except KeyError as e:
+        except (KeyError, TypeError, AttributeError) as e:
             error_msg = str(e)
+            # Check for the specific 'str' object error
+            if "'str' object" in error_msg and "has no attribute 'get'" in error_msg:
+                self.logger.error(
+                    f"get_mood_playlists received string instead of dict (params={params}). "
+                    f"YouTube Music puede estar retornando datos inválidos."
+                )
+                raise ExternalServiceError(
+                    message="YouTube Music retornó datos inválidos para esta categoría.",
+                    details={"params": params, "error": "Expected dict, got string"}
+                )
             if 'musicTwoRowItemRenderer' in error_msg or 'renderer' in error_msg.lower():
                 raise ExternalServiceError(
                     message="Error al parsear la respuesta de YouTube Music.",
                     details={"params": params, "hint": "Intenta actualizar ytmusicapi o usar otro método."}
                 )
-            raise
+            self.logger.error(
+                f"get_mood_playlists error (params={params}): {error_msg}"
+            )
+            raise ExternalServiceError(
+                message="Error al interpretar la respuesta de YouTube Music para este mood.",
+                details={"params": params}
+            )
         except Exception as e:
             error_msg = str(e).lower()
             is_not_found = any(kw in error_msg for kw in [
@@ -246,21 +282,59 @@ class ExploreService(BaseService):
         self._log_operation("get_charts", country=country, page=page, page_size=page_size)
 
         try:
-            result = await asyncio.to_thread(self.ytmusic.get_charts, country)
+            result = await self._call_ytmusic(self.ytmusic.get_charts, country)
             charts = result if result is not None else {}
 
-            # Extract songs from different possible locations
-            songs = charts.get('top_songs', []) or charts.get('videos', [])
+            # Debug: log the keys to understand structure
+            self.logger.debug(f"Charts result keys: {list(charts.keys())}")
 
-            # Standardize songs
-            standardized_songs = [
-                ResponseService.standardize_song_object(song, include_stream_url=False)
-                for song in songs
-            ]
+            # Extract items based on ytmusicapi schema:
+            # - videos: Daily Top Music Videos (has playlistId, not videoId) -> use as trending
+            # - artists: Top Artists (has browseId)
+            # - genres: Featured Genres (has playlistId)
+            # Note: top_songs might be in videos or as separate key
+            raw_items = charts.get('videos') or []
+            
+            # If videos is empty, try top_songs
+            if not raw_items:
+                raw_items = charts.get('top_songs') or []
+
+            # Standardize - handle both songs (videoId) and playlists (playlistId)
+            standardized_items = []
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                    
+                if item.get("videoId"):
+                    # It's a song
+                    try:
+                        standardized_items.append(
+                            ResponseService.standardize_song_object(item, include_stream_url=True)
+                        )
+                    except (ValueError, AttributeError, TypeError) as e:
+                        self.logger.warning(f"Failed to standardize chart item: {e}")
+                        continue
+                elif item.get("playlistId"):
+                    # It's a playlist (Daily Top Videos) - keep as trending item
+                    standardized_items.append({
+                        "playlist_id": item.get("playlistId"),
+                        "browse_id": item.get("browseId"),
+                        "title": item.get("title", ""),
+                        "thumbnails": item.get("thumbnails", []),
+                        "thumbnail": item.get("thumbnails", [{}])[0].get("url") if item.get("thumbnails") else None,
+                        "description": item.get("description", ""),
+                    })
+                else:
+                    # Keep other items as-is
+                    standardized_items.append(item)
+
+            # Extract artists and genres
+            artists = charts.get('artists', [])
+            genres = charts.get('genres', [])
 
             # Paginate
             paginated = PaginationService.paginate(
-                standardized_songs,
+                standardized_items,
                 page=page,
                 page_size=page_size,
                 max_page_size=max_page_size
@@ -268,7 +342,10 @@ class ExploreService(BaseService):
 
             return {
                 "charts": paginated,
-                "country": country or "global"
+                "trending": standardized_items[:page_size],  # Include raw trending for convenience
+                "country": country or "global",
+                "artists": artists,
+                "genres": genres
             }
 
         except Exception as e:
@@ -285,7 +362,7 @@ class ExploreService(BaseService):
         self._log_operation("get_home_with_moods")
         
         try:
-            home = await asyncio.to_thread(self.ytmusic.get_home)
+            home = await self._call_ytmusic(self.ytmusic.get_home)
             if home is None:
                 home = []
         except Exception as e:

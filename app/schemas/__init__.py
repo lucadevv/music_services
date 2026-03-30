@@ -1,16 +1,30 @@
 """Pydantic schemas for API responses."""
 from app.schemas.common import (
     Thumbnail,
-    ArtistBasic,
-    AlbumBasic,
+    Artist,
+    Album,
     SongBasic,
     StreamingInfo,
+    ErrorResponse,
+    SuccessResponse,
+    PaginationMeta,
+    LikeStatus,
+    PrivacyStatus,
+    VideoType,
+    SearchFilter,
 )
+
+# Backwards compatibility aliases
+ArtistBasic = Artist
+AlbumBasic = Album
 from app.schemas.search import (
-    SearchResult,
+    SearchResultItem,
     SearchResponse,
+    SearchRequest,
     SearchSuggestionsResponse,
+    SearchSuggestionsDetailedResponse,
     RemoveSuggestionRequest,
+    RemoveSearchSuggestionsRequest,
 )
 from app.schemas.browse import (
     ArtistResponse,
@@ -22,6 +36,10 @@ from app.schemas.browse import (
     AlbumBrowseIdResponse,
     RelatedSongsResponse,
     RelatedSongItem,
+    AlbumTrack,
+    MoodCategory,
+    MoodCategoriesResponse,
+    ChartsResponse,
 )
 from app.schemas.stream import (
     StreamUrlResponse,
@@ -50,40 +68,55 @@ from app.schemas.explore import (
     ChartsResponse,
     ExploreResponse,
     MoodPlaylistsResponse,
+    MoodPlaylistsPaginatedResponse,
 )
 from app.schemas.playlist import (
     PlaylistTrack,
     PlaylistResponse,
-)
-from app.schemas.podcast import (
-    PodcastChannelResponse,
-    PodcastEpisodeResponse,
-    PodcastResponse,
-    PodcastEpisode,
+    PlaylistCreateRequest,
+    PlaylistEditRequest,
 )
 from app.schemas.watch import (
     WatchPlaylistResponse,
     WatchTrack,
+    WatchRequest,
 )
 from app.schemas.errors import (
-    ErrorResponse,
+    ErrorResponse as ErrorResponseSchema,
     ErrorDetailItem,
     ErrorDetails,
     COMMON_ERROR_RESPONSES,
 )
 
+# Re-export for backwards compatibility
+ArtistBasic = Artist
+AlbumBasic = Album
+
 __all__ = [
     # Common
     "Thumbnail",
-    "ArtistBasic",
-    "AlbumBasic",
+    "Artist",
+    "Album",
     "SongBasic",
     "StreamingInfo",
+    "ErrorResponse",
+    "SuccessResponse",
+    "PaginationMeta",
+    "LikeStatus",
+    "PrivacyStatus",
+    "VideoType",
+    "SearchFilter",
+    # Backwards
+    "ArtistBasic",
+    "AlbumBasic",
     # Search
-    "SearchResult",
+    "SearchResultItem",
     "SearchResponse",
+    "SearchRequest",
     "SearchSuggestionsResponse",
+    "SearchSuggestionsDetailedResponse",
     "RemoveSuggestionRequest",
+    "RemoveSearchSuggestionsRequest",
     # Browse
     "ArtistResponse",
     "ArtistAlbumsResponse",
@@ -94,6 +127,7 @@ __all__ = [
     "AlbumBrowseIdResponse",
     "RelatedSongsResponse",
     "RelatedSongItem",
+    "AlbumTrack",
     # Stream
     "StreamUrlResponse",
     "StreamEnrichedItem",
@@ -118,9 +152,12 @@ __all__ = [
     "ChartsResponse",
     "ExploreResponse",
     "MoodPlaylistsResponse",
+    "MoodPlaylistsPaginatedResponse",
     # Playlist
     "PlaylistTrack",
     "PlaylistResponse",
+    "PlaylistCreateRequest",
+    "PlaylistEditRequest",
     # Podcast
     "PodcastChannelResponse",
     "PodcastEpisodeResponse",
@@ -129,8 +166,9 @@ __all__ = [
     # Watch
     "WatchPlaylistResponse",
     "WatchTrack",
+    "WatchRequest",
     # Errors
-    "ErrorResponse",
+    "ErrorResponseSchema",
     "ErrorDetailItem",
     "ErrorDetails",
     "COMMON_ERROR_RESPONSES",

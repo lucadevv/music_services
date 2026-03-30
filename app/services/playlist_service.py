@@ -88,7 +88,7 @@ class PlaylistService(BaseService):
             # Extract and standardize tracks
             tracks = result.get('tracks', [])
             standardized_tracks = [
-                ResponseService.standardize_song_object(track, include_stream_url=False)
+                ResponseService.standardize_song_object(track, include_stream_url=True)
                 for track in tracks
             ]
 
@@ -101,14 +101,23 @@ class PlaylistService(BaseService):
 
             # Build response with playlist metadata
             response = {
-                "playlist_metadata": {
-                    "title": result.get('title', ''),
-                    "description": result.get('description', ''),
-                    "thumbnail": result.get('thumbnails', [{}])[0].get('url') if result.get('thumbnails') else '',
-                    "year": result.get('year'),
-                    "duration": result.get('duration'),
+                "playlistId": result.get('id'),
+                "title": result.get('title', ''),
+                "description": result.get('description', ''),
+                "author": {
+                    "name": result.get('author', {}).get('name', '') if isinstance(result.get('author'), dict) else result.get('author', ''),
+                    "id": result.get('author', {}).get('id') if isinstance(result.get('author'), dict) else None
                 },
-                "items": paginated['items'],
+                "trackCount": result.get('trackCount'),
+                "duration": result.get('duration'),
+                "durationSeconds": result.get('duration_seconds'),
+                "thumbnails": result.get('thumbnails', []),
+                "thumbnail": result.get('thumbnails', [{}])[0].get('url') if result.get('thumbnails') else '',
+                "views": result.get('views'),
+                "year": result.get('year'),
+                "privacy": result.get('privacy'),
+                "tracks": paginated['items'],
+                "items": paginated['items'],  # Keep for backward compatibility if needed
                 "pagination": paginated['pagination']
             }
 

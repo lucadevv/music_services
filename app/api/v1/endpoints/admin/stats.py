@@ -5,9 +5,9 @@ import logging
 
 from app.schemas.stats import StatsResponse
 from app.schemas.errors import COMMON_ERROR_RESPONSES
-from app.api.v1.endpoints.auth import verify_admin_key
+from app.api.v1.endpoints.admin.auth import verify_admin_key
 
-router = APIRouter(tags=["stats"])
+router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ async def get_stats(
         cache_metrics = {"error": str(e)}
 
     return StatsResponse(
-        service=settings.PROJECT_NAME,
+        service="YouTube Music Service",
         version=settings.VERSION,
         rate_limiting={
             "enabled": settings.RATE_LIMIT_ENABLED,
@@ -109,10 +109,33 @@ async def get_stats(
         },
         caching=cache_stats,
         cache_manager=cache_metrics,
-        circuit_breaker={"youtube_stream": circuit_status},
+        circuit_breaker=circuit_status,
         performance={
             "compression": settings.ENABLE_COMPRESSION,
             "http_timeout": settings.HTTP_TIMEOUT,
             "max_workers": settings.MAX_WORKERS
         }
     )
+
+
+@router.get(
+    "/cache-manager",
+    summary="Get detailed cache manager metrics",
+    description="Obtiene métricas detalladas del Cache Manager: warm-up, refrescos asíncronos y estado del loop.",
+    response_description="Métricas detalladas del Cache Manager",
+    responses={200: {"description": "Métricas obtenidas exitosamente"}, **COMMON_ERROR_RESPONSES}
+)
+async def get_cache_manager_stats(
+    _verified: None = Depends(verify_admin_key),
+) -> Dict[str, Any]:
+    """Obtiene métricas detalladas del Cache Manager."""
+    from app.core.background_cache import cache_manager
+    from app.core.browser_client import get_auth_status
+    
+    metrics = cache_manager.get_metrics()
+    auth_status = get_auth_status()
+    
+    return {
+        **metrics,
+        "browser_load_balancing": auth_status
+    }

@@ -20,16 +20,12 @@ PUBLIC_PATHS = {
 
 # Admin routes handle their own auth via X-Admin-Key dependency.
 ADMIN_BYPASS_PATHS = (
-    "/api/v1/auth",
-    "/api/v1/api-keys",
-    "/api/v1/stats",
-    "/api/v1/stream/cache",
-    "/api/v1/stream/status",
+    "/api/v1/admin/",
 )
 
 # Paths that require admin privileges
 ADMIN_PATHS = [
-    "/api/v1/api-keys",
+    "/api/v1/admin/api-keys",
 ]
 
 

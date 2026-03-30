@@ -10,6 +10,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.core.database import get_db
 from app.core.config import get_settings
+from app.core.cache_redis import get_cached_value, set_cached_value
 
 settings = get_settings()
 security = HTTPBearer()
@@ -20,16 +21,19 @@ async def verify_api_key(
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """
-    Verify API key from Authorization header.
-    
-    Returns dict with key info if valid.
-    Raises HTTPException 401 if invalid.
+    Verify API key with Redis caching to avoid database bottlenecks.
     """
     token = credentials.credentials
     
-    # Query database for API key
+    # 1. Check Redis cache first
+    cache_key = f"auth:api_key:{token}"
+    cached_info = await get_cached_value(cache_key)
+    if cached_info:
+        return cached_info
+
+    # 2. Query database if not in cache
     query = text("""
-        SELECT key_id, api_key, title, description, enabled, is_admin, created_at, last_used
+        SELECT key_id, title, description, enabled, is_admin, created_at
         FROM api_keys
         WHERE api_key = :api_key
     """)
@@ -43,7 +47,7 @@ async def verify_api_key(
             detail="Invalid API key"
         )
     
-    key_id, api_key, title, description, enabled, is_admin, created_at, last_used = row
+    key_id, title, description, enabled, is_admin, created_at = row
     
     if not enabled:
         raise HTTPException(
@@ -51,20 +55,21 @@ async def verify_api_key(
             detail="API key is disabled"
         )
     
-    # Update last_used timestamp
-    await db.execute(
-        text("UPDATE api_keys SET last_used = CURRENT_TIMESTAMP WHERE key_id = :key_id"),
-        {"key_id": key_id}
-    )
-    await db.commit()
-    
-    return {
+    key_info = {
         "key_id": key_id,
         "title": title,
         "description": description,
         "is_admin": is_admin,
-        "created_at": created_at,
+        "created_at": str(created_at) if created_at else None,
     }
+    
+    # 3. Store in Redis for 5 minutes (300s)
+    await set_cached_value(cache_key, key_info, ttl=300)
+    
+    # Note: Removed UPDATE last_used for performance under high load.
+    # Consider doing this asynchronously or only once per hour.
+    
+    return key_info
 
 
 async def verify_admin_key(
