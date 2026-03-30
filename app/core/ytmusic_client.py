@@ -1,53 +1,24 @@
-"""YouTube Music client dependency with OAuth authentication."""
-from functools import lru_cache
-from pathlib import Path
-from ytmusicapi import YTMusic, OAuthCredentials
-from app.core.config import get_settings
+"""YouTube Music client - delegates to browser_client.py for authentication."""
+from app.core.browser_client import (
+    get_ytmusic as _get_ytmusic,
+    is_authenticated as _is_authenticated,
+    reset_client_cache as _reset_client_cache,
+)
 
 
-@lru_cache()
-def get_ytmusic_client() -> YTMusic:
-    """Get cached YTMusic client instance using OAuth authentication."""
-    settings = get_settings()
+def get_ytmusic():
+    """Get YTMusic client with browser authentication.
     
-    # Rutas de archivos de autenticación
-    oauth_path = Path(settings.OAUTH_JSON_PATH)
-    browser_path = Path(settings.BROWSER_JSON_PATH)
-    client_id = settings.YTMUSIC_CLIENT_ID
-    client_secret = settings.YTMUSIC_CLIENT_SECRET
-    
-    # Intentar browser.json primero (más estable)
-    if browser_path.exists():
-        try:
-            client = YTMusic(str(browser_path))
-            print("✅ YTMusic inicializado con browser.json")
-            return client
-        except Exception as e:
-            print(f"⚠️ Browser auth falló: {e}")
-    
-    # Fallback a OAuth si browser no funciona
-    if oauth_path.exists() and client_id and client_secret:
-        try:
-            credentials = OAuthCredentials(
-                client_id=client_id,
-                client_secret=client_secret
-            )
-            client = YTMusic(str(oauth_path), oauth_credentials=credentials)
-            print("✅ YTMusic inicializado con OAuth")
-            return client
-        except Exception as e:
-            print(f"⚠️ OAuth falló: {e}")
-    
-    raise FileNotFoundError(
-        f"No se encontró archivo de autenticación.\n"
-        f"Opciones:\n"
-        f"  1. OAuth: Configura YTMUSIC_CLIENT_ID y YTMUSIC_CLIENT_SECRET en .env\n"
-        f"     y genera oauth.json con: ytmusicapi oauth\n"
-        f"  2. Browser: Crea browser.json siguiendo: "
-        f"https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html"
-    )
+    Delegates to browser_client.py which handles rotation.
+    """
+    return _get_ytmusic()
 
 
-def get_ytmusic() -> YTMusic:
-    """Dependency for FastAPI to get YTMusic client."""
-    return get_ytmusic_client()
+def is_authenticated() -> bool:
+    """Check if at least one browser account is available."""
+    return _is_authenticated()
+
+
+def reset_ytmusic_client() -> None:
+    """Invalidate the cached YTMusic clients to force re-creation."""
+    _reset_client_cache()

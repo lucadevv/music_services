@@ -11,7 +11,6 @@ from app.core.cache_redis import (
     clear_cache,
     get_cache_stats,
     cache_result,
-    cache_module,
     settings,
 )
 
@@ -27,6 +26,5 @@ __all__ = [
     "clear_cache",
     "get_cache_stats",
     "cache_result",
-    "cache_module",
     "settings",
 ]

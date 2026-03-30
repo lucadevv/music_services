@@ -9,7 +9,7 @@ This module provides centralized exception handling that:
 from typing import Dict, Any
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
+from fastapi.exceptions import RequestValidationError, HTTPException
 
 from app.core.exceptions import YTMusicServiceException
 from app.core.logging_config import get_logger
@@ -174,6 +174,42 @@ def _translate_validation_message(msg: str) -> str:
     return msg
 
 
+async def http_exception_handler(
+    request: Request, 
+    exc: HTTPException
+) -> JSONResponse:
+    """Handler for HTTPException - converts to ErrorResponse format."""
+    error_codes = {
+        400: "VALIDATION_ERROR",
+        401: "AUTHENTICATION_ERROR",
+        403: "FORBIDDEN",
+        404: "NOT_FOUND",
+        409: "CONFLICT",
+        422: "VALIDATION_ERROR",
+        429: "RATE_LIMIT_ERROR",
+        500: "INTERNAL_ERROR",
+        502: "EXTERNAL_SERVICE_ERROR",
+        503: "SERVICE_UNAVAILABLE",
+    }
+    
+    error_code = error_codes.get(exc.status_code, "UNKNOWN_ERROR")
+    message = exc.detail
+    
+    if isinstance(message, dict) and message.get("error"):
+        return JSONResponse(status_code=exc.status_code, content=message)
+    
+    logger.warning(f"HTTP error on {request.method} {request.url.path}: [{exc.status_code}] {message}")
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": True,
+            "error_code": error_code,
+            "message": str(message),
+        }
+    )
+
+
 def register_exception_handlers(app) -> None:
     """Register all exception handlers with the FastAPI app.
     
@@ -186,6 +222,7 @@ def register_exception_handlers(app) -> None:
     # Register custom exception handlers
     app.add_exception_handler(YTMusicServiceException, ytmusic_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(HTTPException, http_exception_handler)
     
     # Note: Uncomment to catch ALL unhandled exceptions (useful in production)
     # app.add_exception_handler(Exception, generic_exception_handler)

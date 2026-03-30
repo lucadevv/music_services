@@ -35,7 +35,7 @@ def mock_settings() -> Settings:
         API_V1_STR="/api/v1",
         PROJECT_NAME="Test YouTube Music Service",
         VERSION="1.0.0-test",
-        BROWSER_JSON_PATH="browser.json",
+        OAUTH_JSON_PATH="oauth.json",
         CORS_ORIGINS="*",
         CORS_ALLOW_CREDENTIALS=True,
         CORS_ALLOW_METHODS="*",
@@ -102,22 +102,6 @@ def mock_ytmusic():
     
     # Watch methods
     mock.get_watch_playlist.return_value = {}
-    
-    # Podcast methods
-    mock.get_channel.return_value = {}
-    mock.get_channel_episodes.return_value = {}
-    mock.get_podcast.return_value = {}
-    mock.get_episode.return_value = {}
-    mock.get_episodes_playlist.return_value = {}
-    
-    # Library/Upload methods
-    mock.get_library_upload_songs.return_value = []
-    mock.get_library_upload_artists.return_value = []
-    mock.get_library_upload_albums.return_value = []
-    mock.get_library_upload_artist.return_value = {}
-    mock.get_library_upload_album.return_value = {}
-    mock.upload_song.return_value = {}
-    mock.delete_upload_entity.return_value = True
     
     return mock
 
@@ -562,7 +546,7 @@ class MockStreamService:
         self._get_stream_url_side_effect = None
         self._enrich_items_with_streams_side_effect = None
     
-    async def get_stream_url(self, video_id: str):
+    async def get_stream_url(self, video_id: str, bypass_cache: bool = False):
         if self._get_stream_url_side_effect:
             raise self._get_stream_url_side_effect
         return self._get_stream_url_return
@@ -571,6 +555,74 @@ class MockStreamService:
         if self._enrich_items_with_streams_side_effect:
             raise self._enrich_items_with_streams_side_effect
         return self._enrich_items_with_streams_return
+
+
+class MockWatchService:
+    """Mock WatchService for integration tests."""
+
+    def __init__(self):
+        self._get_watch_playlist_return = {"tracks": []}
+        self._get_watch_playlist_side_effect = None
+
+    async def get_watch_playlist(self, **kwargs):
+        if self._get_watch_playlist_side_effect:
+            raise self._get_watch_playlist_side_effect
+        return self._get_watch_playlist_return
+
+
+class MockPlaylistService:
+    """Mock PlaylistService for integration tests."""
+
+    def __init__(self):
+        self._get_playlist_return = {"tracks": []}
+        self._get_playlist_side_effect = None
+
+    async def get_playlist(self, *args, **kwargs):
+        if self._get_playlist_side_effect:
+            raise self._get_playlist_side_effect
+        return self._get_playlist_return
+
+
+class MockPodcastService:
+    """Mock PodcastService for integration tests."""
+
+    def __init__(self):
+        self._get_channel_return = {}
+        self._get_channel_episodes_return = {}
+        self._get_podcast_return = {}
+        self._get_episode_return = {}
+        self._get_episodes_playlist_return = {}
+
+        self._get_channel_side_effect = None
+        self._get_channel_episodes_side_effect = None
+        self._get_podcast_side_effect = None
+        self._get_episode_side_effect = None
+        self._get_episodes_playlist_side_effect = None
+
+    async def get_channel(self, channel_id, limit=25):
+        if self._get_channel_side_effect:
+            raise self._get_channel_side_effect
+        return self._get_channel_return
+
+    async def get_channel_episodes(self, channel_id, limit=25, params=None):
+        if self._get_channel_episodes_side_effect:
+            raise self._get_channel_episodes_side_effect
+        return self._get_channel_episodes_return
+
+    async def get_podcast(self, browse_id, limit=25):
+        if self._get_podcast_side_effect:
+            raise self._get_podcast_side_effect
+        return self._get_podcast_return
+
+    async def get_episode(self, browse_id):
+        if self._get_episode_side_effect:
+            raise self._get_episode_side_effect
+        return self._get_episode_return
+
+    async def get_episodes_playlist(self, browse_id, limit=25):
+        if self._get_episodes_playlist_side_effect:
+            raise self._get_episodes_playlist_side_effect
+        return self._get_episodes_playlist_return
 
 
 # ============================================================================

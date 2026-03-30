@@ -40,6 +40,7 @@ env/
 
 # Credentials - CRITICAL
 browser.json
+browser/
 oauth.json
 *.json.bak
 

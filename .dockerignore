@@ -38,6 +38,9 @@ ENV/
 .env.local
 .env.*.local
 
+# OAuth token (managed via Docker volume, not baked into image)
+oauth.json
+
 # Git
 .git/
 .gitignore

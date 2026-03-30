@@ -1,0 +1,118 @@
+"""Playlist endpoints."""
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
+from typing import Optional, Dict, Any
+from ytmusicapi import YTMusic
+
+from app.core.ytmusic_client import get_ytmusic
+from app.core.exceptions import YTMusicServiceException
+from app.schemas.playlist import PlaylistResponse
+from app.schemas.errors import COMMON_ERROR_RESPONSES
+from app.services.playlist_service import PlaylistService
+from app.services.stream_service import StreamService
+
+router = APIRouter()
+
+
+def get_playlist_service(ytmusic: YTMusic = Depends(get_ytmusic)) -> PlaylistService:
+    """Dependency to get playlist service."""
+    return PlaylistService(ytmusic)
+
+
+def get_stream_service() -> StreamService:
+    """Dependency to get stream service."""
+    return StreamService()
+
+
+@router.get(
+    "/{playlist_id}",
+    response_model=PlaylistResponse,
+    summary="Get playlist",
+    description="Obtiene información completa de una playlist pública incluyendo todas sus canciones.",
+    response_description="Información de la playlist con tracks",
+    responses={
+        200: {
+            "description": "Playlist obtenida exitosamente",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "title": "Playlist Title",
+                        "trackCount": 50,
+                        "tracks": [
+                            {
+                                "videoId": "rMbATaj7Il8",
+                                "title": "Track Title",
+                                "artists": [{"name": "Artist"}],
+                                "stream_url": "https://...",
+                                "thumbnail": "https://..."
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        **COMMON_ERROR_RESPONSES
+    }
+)
+async def get_playlist(
+    playlist_id: str = Path(..., description="ID de la playlist (acepta browseId con prefijo VL)", examples={"example1": {"value": "PL..."}}),
+    limit: int = Query(100, ge=1, le=5000, description="Número máximo de canciones"),
+    start_index: int = Query(0, ge=0, description="Índice inicial para paginación"),
+    page: int = Query(1, ge=1, le=100, description="Número de página (1-indexed)"),
+    page_size: int = Query(10, ge=1, le=50, description="Items por página"),
+    related: bool = Query(False, description="Incluir canciones relacionadas"),
+    suggestions_limit: int = Query(0, ge=0, le=50, description="Límite de sugerencias"),
+    include_stream_urls: bool = Query(
+        True, 
+        description="Incluir stream URLs y mejores thumbnails para tracks"
+    ),
+    prefetch_count: int = Query(
+        10, 
+        ge=-1, 
+        le=50,
+        description="Número de URLs a obtener en paralelo (0 = none, -1 = todas)"
+    ),
+    service: PlaylistService = Depends(get_playlist_service),
+    stream_service: StreamService = Depends(get_stream_service)
+) -> Dict[str, Any]:
+    """
+    Obtiene información completa de una playlist pública con paginación estandarizada.
+    
+    - Acepta `playlistId` o `browseId` (con prefijo VL, se normaliza automáticamente)
+    - `page`: Número de página (1 = primera página)
+    - `page_size`: Items por página (default 10, máximo 50)
+    - `prefetch_count`: Cuántos tracks enriquecer con stream URLs (default: 10, -1 = todos)
+    
+    Si `include_stream_urls=true` y `prefetch_count > 0`, los primeros N tracks incluyen:
+    - `stream_url`: URL directa de audio (mejor calidad)
+    """
+    playlist_data = await service.get_playlist(
+        playlist_id=playlist_id,
+        limit=limit,
+        related=related,
+        suggestions_limit=suggestions_limit,
+        start_index=start_index,
+        page=page,
+        page_size=page_size
+    )
+
+    # Enrich tracks with stream URLs
+    if include_stream_urls and prefetch_count != 0 and playlist_data.get('items'):
+        tracks = playlist_data['items']
+        tracks_to_enrich = tracks if prefetch_count == -1 else tracks[:prefetch_count]
+        tracks_remaining = [] if prefetch_count == -1 else tracks[prefetch_count:]
+
+        if tracks_to_enrich:
+            enriched_tracks = await stream_service.enrich_items_with_streams(
+                tracks_to_enrich,
+                include_stream_urls=True
+            )
+
+            if tracks_remaining:
+                enriched_tracks.extend(tracks_remaining)
+
+            playlist_data['items'] = enriched_tracks
+            tracks_with_url = sum(1 for t in enriched_tracks if t.get('stream_url'))
+            playlist_data['stream_urls_prefetched'] = tracks_with_url
+            playlist_data['stream_urls_total'] = len(enriched_tracks)
+
+    return playlist_data

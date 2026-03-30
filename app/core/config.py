@@ -1,4 +1,5 @@
 """Application configuration."""
+import os
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import Optional
@@ -12,15 +13,12 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "YouTube Music Service"
     VERSION: str = "1.0.0"
     
-    BROWSER_JSON_PATH: str = "browser.json"
-    OAUTH_JSON_PATH: str = "oauth.json"
-    YTMUSIC_CLIENT_ID: Optional[str] = None
-    YTMUSIC_CLIENT_SECRET: Optional[str] = None
-    
-    CORS_ORIGINS: str = "*"
-    CORS_ALLOW_CREDENTIALS: bool = True
-    CORS_ALLOW_METHODS: str = "*"
-    CORS_ALLOW_HEADERS: str = "*"
+    # PostgreSQL
+    POSTGRES_HOST: str = "postgres"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_USER: str = "music_user"
+    POSTGRES_PASSWORD: str = "music_password"
+    POSTGRES_DB: str = "music_db"
     
     HOST: str = "0.0.0.0"
     PORT: int = 8000
@@ -46,6 +44,15 @@ class Settings(BaseSettings):
     ENABLE_COMPRESSION: bool = True
     MAX_WORKERS: int = 10
     
+    CORS_ORIGINS: str = "*"
+    CORS_ALLOW_CREDENTIALS: bool = True
+    CORS_ALLOW_METHODS: str = "*"
+    CORS_ALLOW_HEADERS: str = "*"
+    
+    ADMIN_SECRET_KEY: str = ""
+
+    BROWSER_ACCOUNTS_DIR: str = "/app/browser"
+
     class Config:
         env_file = ".env"
         case_sensitive = True
