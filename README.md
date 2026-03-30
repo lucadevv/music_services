@@ -1,331 +1,112 @@
-# Music Services (YouTube Music API)
+# 🎵 YouTube Music API Service
 
-API REST construida con **FastAPI** que wrappinga `ytmusicapi` + `yt-dlp` para proveer endpoints de búsqueda, browse, streaming y más sobre YouTube Music.
+<div align="center">
 
-Diseñada para ser consumida por un backend NestJS dentro de un monorepo.
+![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)
+![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
+![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
+![Redis](https://img.shields.io/badge/redis-%23DD0031.svg?style=for-the-badge&logo=redis&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
 
-- 🔍 **Búsqueda**: Canciones, videos, álbumes, artistas, playlists
-- 🎧 **Streaming**: URLs directas de audio (best quality)
-- 📱 **Navegación**: Artistas, álbumes, canciones, letras
-- 🔑 **Browser Admin**: Configuración de autenticación desde panel admin
+**Servicio de alto rendimiento para la extracción de música, metadatos y streaming directo.**
+*Construido con FastAPI, ytmusicapi y yt-dlp.*
 
-## Stack
+[Reportar Bug](https://github.com/lucadevv/music_services/issues) · [Solicitar Feature](https://github.com/lucadevv/music_services/issues)
 
-| Componente | Tecnología |
-|------------|-----------|
-| Framework | FastAPI |
-| Lenguaje | Python 3.11 |
-| YouTube Music | ytmusicapi |
-| Streaming | yt-dlp |
-| Cache | Redis 7 (service-layer only) |
-| Rate Limiting | slowapi |
-| Validación | Pydantic v2 |
-| Containerización | Docker + Compose |
+</div>
 
-## Arquitectura
+---
 
-```
-HTTP Request
-    ↓
-[Middleware] → CORS, GZip, Rate Limiting (slowapi+Redis)
-    ↓
-[API Layer] → app/api/v1/endpoints/*.py (33 endpoints)
-    ↓
-[Service Layer] → app/services/*.py (lógica de negocio + @cache_result para metadata)
-    ↓
-[Core Layer] → Redis cache (service-level only), Circuit Breaker, Exceptions
-    ↓
-[External] → ytmusicapi (metadata) + yt-dlp (stream URLs, runtime)
-```
+## 🚀 ¿Qué hace este servicio?
 
-**Nota**: `/explore/category/{params}` está deprecado y es un alias de `/explore/moods/{params}`.
+Este no es solo un wrapper de la API de YouTube Music. Es un ecosistema completo diseñado para ser el motor musical de aplicaciones modernas. Provee una interfaz estandarizada para buscar, navegar y, lo más importante, obtener **flujos de audio directo (streams)** de alta calidad sin las complicaciones de las cuotas de API oficiales.
 
-### Cache Architecture
+### ✨ Características Principales
 
-El sistema usa un **two-tier caching strategy**:
+- 🔍 **Búsqueda Avanzada**: Resultados precisos para canciones, álbumes, artistas y playlists.
+- 🎧 **Streaming Inteligente**: URLs directas (best audio) con sistema de enriquecimiento en runtime para evitar expiración de enlaces.
+- 🌍 **Soporte Multi-plataforma**: Nuevo endpoint genérico `yt-dlp` para extraer audio/video de prácticamente cualquier red social (TikTok, IG, Twitter, etc.).
+- 🛡️ **Arquitectura Resiliente**: Circuit Breaker para protección contra bloqueos y Rate Limiting integrado.
+- ⚡ **Caché de Dos Niveles**: Metadata cacheada por 24h y Stream URLs por 1h usando Redis.
+- 🔐 **Seguridad Dual**: Separación clara entre acceso de usuario (`Bearer Token`) y gestión administrativa (`X-Admin-Key`).
 
-| Layer | Qué se cachea | TTL | Key Pattern |
-|-------|---------------|-----|-------------|
-| **Service** (`@cache_result`) | Metadata (canciones, álbumes, playlists, etc.) | 1-24h | `music:{method}:{hash}` |
-| **Stream** (`StreamService`) | Stream URLs (audio directo) | 1h | `music:stream:url:{video_id}` |
+---
 
-**Regla de oro**: Las stream URLs **NUNCA** se cachean dentro de respuestas de endpoint. Siempre se inyectan en runtime via `stream_service.enrich_items_with_streams()`.
+## 🛠️ Stack Tecnológico
 
-Esto elimina los 403 que ocurrían cuando YouTube expira las URLs (~6h) y el endpoint cache las servía stale.
+| Componente | Tecnología | Rol |
+| :--- | :--- | :--- |
+| **Framework** | FastAPI | Core API & OpenAPI Spec |
+| **Runtime** | Python 3.11+ | Motor de ejecución |
+| **Streaming** | yt-dlp | Extracción de streams de alta calidad |
+| **Metadata** | ytmusicapi | Interfaz con YouTube Music |
+| **Caché** | Redis 7 | Almacenamiento persistente y temporal |
+| **Despliegue** | Docker | Containerización completa |
 
-## Endpoints (33)
+---
 
-### Search
+## 🔐 Seguridad y Autenticación
 
-| Method | Route | Summary |
-|--------|-------|---------|
-| GET | `/search/` | Search music content |
-| GET | `/search/suggestions` | Get search suggestions |
-| DELETE | `/search/suggestions` | Remove search suggestion |
+El servicio implementa una separación de responsabilidades estricta:
 
-### Browse
-
-| Method | Route | Summary |
-|--------|-------|---------|
-| GET | `/browse/home` | Get home page |
-| GET | `/browse/artist/{channel_id}/albums` | Get artist albums |
-| GET | `/browse/album/{album_id}` | Get album info |
-| GET | `/browse/album/{album_id}/browse-id` | Get album browse ID |
-| GET | `/browse/song/{video_id}` | Get song metadata |
-| GET | `/browse/song/{video_id}/related` | Get related songs |
-| GET | `/browse/lyrics/{browse_id}` | Get lyrics |
-| GET | `/browse/lyrics-by-video/{video_id}` | Get lyrics by video |
-
-### Explore
-
-| Method | Route | Summary |
-|--------|-------|---------|
-| GET | `/explore/` | Get explore content |
-| GET | `/explore/moods` | Get mood categories |
-| GET | `/explore/moods/{params}` | Get mood playlists |
-| GET | `/explore/charts` | Get charts |
-| GET | `/explore/category/{params}` | ⚠️ DEPRECATED — alias for `/moods/{params}` |
-
-### Stream
-
-| Method | Route | Summary |
-|--------|-------|---------|
-| GET | `/stream/{video_id}` | Get audio stream URL |
-| GET | `/stream/proxy/{video_id}` | Proxy audio stream |
-| GET | `/stream/batch` | Batch stream URLs |
-| GET | `/stream/cache/stats` | Cache statistics |
-| DELETE | `/stream/cache` | Clear stream cache |
-| GET | `/stream/cache/info/{video_id}` | Check cached URL |
-| DELETE | `/stream/cache/{video_id}` | Delete cached URL |
-| GET | `/stream/status/{video_id}` | Check if URL cached |
-
-### Watch
-
-| Method | Route | Summary |
-|--------|-------|---------|
-| GET | `/watch/` | Watch playlist (radio) |
-
-### Playlists
-
-| Method | Route | Summary |
-|--------|-------|---------|
-| GET | `/playlists/{playlist_id}` | Get playlist |
-
-### Podcasts
-
-| Method | Route | Summary |
-|--------|-------|---------|
-| GET | `/podcasts/channel/{channel_id}` | Get podcast channel |
-| GET | `/podcasts/channel/{channel_id}/episodes` | Get channel episodes |
-| GET | `/podcasts/{browse_id}` | Get podcast |
-| GET | `/podcasts/episode/{browse_id}` | Get episode |
-| ~~GET~~ | ~~`/podcasts/episodes/{browse_id}/playlist`~~ | ~~Get episodes playlist~~ ⚠️ DEPRECATED |
-
-### Autenticación
-
-El servicio separa autenticación de **música** y **admin**:
-
-- Endpoints de música (`/search`, `/browse`, `/explore`, `/playlists`, `/watch`, `/stream/{video_id}`, `/stream/proxy/{video_id}`, `/stream/batch`, `/podcasts`) requieren:
-  - `Authorization: Bearer <api_key>`
-- Endpoints de admin (`/auth/*`, `/api-keys/*`, `/stats/*`, `/stream/cache*`, `/stream/status/*`) requieren:
-  - `X-Admin-Key: <ADMIN_SECRET_KEY>`
-
-Ejemplo para endpoints de música:
-
+### 🎵 Music Endpoints (`/api/v1/music/*`)
+Requieren una **API Key** de usuario.
 ```bash
-curl -H "Authorization: Bearer sk_live_tu_api_key" \
-  "http://localhost:8000/api/v1/search/?q=eminem"
+Authorization: Bearer <tu_api_key>
 ```
 
-### Endpoints de Autenticación (`/api/v1/auth/*`)
-
-**API Keys** - Gestión de claves API con rotación y control granular:
-
-1. **POST /auth/api-keys** - Crear nueva API key
-2. **GET /auth/api-keys** - Listar todas las API keys
-3. **GET /auth/api-keys/{key_id}** - Obtener API key específica
-4. **PATCH /auth/api-keys/{key_id}** - Actualizar API key (título, habilitado/inhabilitado)
-5. **DELETE /auth/api-keys/{key_id}** - Eliminar API key
-6. **POST /auth/api-keys/verify** - Verificar si una API key es válida
-
-**Browser Authentication** - Gestión de cuentas de YouTube Music:
-
-1. **POST /auth/browser/from-url** - Agregar cuenta desde URL
-2. **POST /auth/browser/from-headers** - Agregar cuenta desde headers
-3. **GET /auth/browser** - Listar cuentas
-4. **DELETE /auth/browser/{account_name}** - Eliminar cuenta
-5. **POST /auth/browser/test** - Probar autenticación
-6. **GET /auth/status** - Estado de autenticación
-
-### Primer Uso
-
-**Al iniciar el servicio por primera vez:**
-
-1. Configurá `ADMIN_SECRET_KEY` en tu `.env`
-2. Usá ese valor en el header `X-Admin-Key` para todos los endpoints de admin
-
-**Crear nuevas API keys:**
-
+### 🔐 Admin Endpoints (`/api/v1/admin/*`)
+Requieren la **Master Admin Key** configurada en el servidor.
 ```bash
-curl -X POST http://localhost:8000/api/v1/auth/api-keys \
-  -H "X-Admin-Key: your-admin-secret-key" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Mobile App"}'
+X-Admin-Key: <admin_secret_key>
 ```
 
-**Respuesta:**
-```json
-{
-  "key_id": "abc123def456",
-  "api_key": "sk_live_1a2b3c4d5e6f7g8h9i0j",
-  "title": "Mobile App",
-  "enabled": true,
-  "created_at": "2026-03-29T10:00:00Z",
-  "is_master": false
-}
-```
+---
 
-**Usar API key:**
-```bash
-curl http://localhost:8000/api/v1/auth/browser \
-  -H "X-Admin-Key: your-admin-secret-key"
-```
+## 📦 Instalación y Uso (Docker)
 
-### Retrocompatibilidad
+La forma recomendada de correr este servicio es usando Docker para asegurar que todas las dependencias (Redis, Postgres) estén listas.
 
-`ADMIN_SECRET_KEY` es obligatorio para endpoints de admin. Las API keys de base de datos se usan para consumo de endpoints de música.
+1. **Clonar el repo**
+   ```bash
+   git clone https://github.com/lucadevv/music_services.git
+   cd music_services
+   ```
 
-### Stats
+2. **Configurar entorno**
+   ```bash
+   cp .env.example .env
+   # Edita .env con tus credenciales
+   ```
 
-| Method | Route | Summary |
-|--------|-------|---------|
-| GET | `/stats/stats` | Service statistics |
+3. **Levantar con Docker Compose**
+   ```bash
+   docker compose up -d --build
+   ```
 
-## Requisitos Previos
+4. **Acceder a la documentación**
+   - **Swagger UI**: `http://localhost:8000/docs`
+   - **ReDoc**: `http://localhost:8000/redoc`
 
-- Python 3.9+
-- Redis 7
-- Credenciales OAuth de Google Cloud (YouTube Data API v3)
+---
 
-## Instalación Rápida
+## 🗺️ Estructura de Endpoints (Estandarizada)
 
-```bash
-# Clonar
-git clone <repo-url>
-cd music_services
+### 🎵 Música (`/api/v1/music`)
+- `GET /search` - Búsqueda global y sugerencias.
+- `GET /browse` - Artistas, álbumes, letras y navegación por casa.
+- `GET /explore` - Charts mundiales, moods y géneros.
+- `GET /stream` - Obtención de URLs directas y proxy de audio.
+- `GET /ytdlp` - **(Nuevo)** Extracción genérica de cualquier red social.
 
-# Entorno virtual
-python3 -m venv venv
-source venv/bin/activate
+### 🔐 Administración (`/api/v1/admin`)
+- `GET /api-keys` - Gestión de llaves de acceso de usuarios.
+- `GET /stats` - Métricas de rendimiento, caché y uso.
+- `GET /cache` - Gestión manual del almacenamiento en Redis.
+- `GET /auth` - Configuración de cuentas de navegador.
 
-# Dependencias
-pip install -r requirements.txt
+---
 
-# Configurar .env
-cp .env.example .env
-# Editar .env con tus credenciales OAuth
-```
-
-## Configuración OAuth
-
-Ver [README_OAUTH.md](./README_OAUTH.md) para la guía completa de configuración de credenciales.
-
-Resumen rápido:
-
-1. Crear OAuth Client ID en [Google Cloud Console](https://console.cloud.google.com/) (tipo: TVs and Limited Input Devices)
-2. Habilitar **YouTube Data API v3**
-3. Configurar credenciales en `.env`:
-
-```env
-YTMUSIC_CLIENT_ID=tu_client_id.apps.googleusercontent.com
-YTMUSIC_CLIENT_SECRET=tu_client_secret
-```
-
-4. Generar `oauth.json`:
-
-```bash
-python scripts/generate_oauth.py
-```
-
-## API de Autenticación OAuth
-
-El servicio incluye endpoints de administración para configurar la autenticación de YouTube Music desde un panel admin. Consulta la [documentación completa](./README_AUTH_API.md) para detalles sobre los endpoints `/api/v1/auth/*` (guardar credenciales, iniciar flujo OAuth, verificar autorización, etc.).
-
-La especificación OpenAPI está disponible en:
-- JSON: `/openapi.json`
-- YAML: `/openapi.yaml`
-- Referencia rápida endpoints + schemas: `docs/SWAGGER_REFERENCE.md`
-
-## Levantar el servicio
-
-```bash
-# Desarrollo (con hot reload)
-docker-compose --profile dev up -d
-
-# Producción
-docker-compose up -d
-
-# Solo local (sin Docker)
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-## Variables de Entorno
-
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `HOST` | `0.0.0.0` | Host de escucha |
-| `PORT` | `8000` | Puerto |
-| `CORS_ORIGINS` | `*` | Orígenes permitidos |
-| `RATE_LIMIT_ENABLED` | `true` | Activar rate limiting |
-| `RATE_LIMIT_PER_MINUTE` | `60` | Requests por minuto por IP |
-| `CACHE_ENABLED` | `true` | Activar caché Redis |
-| `CACHE_BACKEND` | `memory` | Backend de caché (memory/redis) |
-| `REDIS_HOST` | `localhost` | Host de Redis |
-| `REDIS_PORT` | `6379` | Puerto de Redis |
-| `YTMUSIC_CLIENT_ID` | - | OAuth Client ID |
-| `YTMUSIC_CLIENT_SECRET` | - | OAuth Client Secret |
-
-## Tests
-
-```bash
-# Unit tests
-pytest tests/unit/ -v
-
-# Integration tests (requiere Redis corriendo)
-pytest tests/integration/ -v
-
-# Todos con coverage
-pytest --cov=app tests/ -v
-```
-
-## Estructura del Proyecto
-
-```
-music_services/
-├── app/
-│   ├── api/v1/endpoints/    # Routers (~10 dominios)
-│   ├── core/                # Config, cache, exceptions, validators
-│   ├── schemas/             # Pydantic response models
-│   ├── services/            # Lógica de negocio
-│   └── main.py              # Entry point FastAPI
-├── tests/
-│   ├── unit/
-│   └── integration/
-├── scripts/                 # Scripts utilitarios
-├── Dockerfile
-├── docker-compose.yml
-└── docker-compose.dev.yml
-```
-
-## Fixes Recientes
-
-| Ticket | Endpoint | Problema | Solución |
-|--------|----------|----------|----------|
-| SCRUM-32 | `/browse/album/{id}/browse-id` | 500 cuando ytmusicapi retorna None | Fallback a `get_album` para extraer `audioPlaylistId` |
-| SCRUM-33 | `/stats/stats` | 500 por ImportError si Redis no disponible | Graceful degradation con error informativo |
-| SCRUM-34 | `/explore/category/{params}` | ytmusicapi deprecado | Alias de `/explore/moods/{params}` con header `Warning: 299` |
-| SCRUM-35 | `/browse/artist/{id}/albums` | 500 por rate limit (429) | Retry (2 intentos) + fallback via `get_artist()` |
-
-## Licencia
-
-Privado - Uso interno
+<div align="center">
+Desarrollado con ❤️ para la comunidad musical.
+</div>
