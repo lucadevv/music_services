@@ -17,6 +17,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
+    image: music-api
     container_name: music_services_api
     restart: unless-stopped
     ports:
